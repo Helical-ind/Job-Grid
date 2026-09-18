@@ -232,6 +232,11 @@
     border-radius:4px; padding:6px 8px; color:var(--steel-200); font-family:var(--mono); font-size:12px; box-sizing:border-box;
   }
   .process-input:focus{border-color:var(--amber);}
+  .process-select{
+    all:unset; flex:1 1 110px; min-width:100px; background:var(--steel-900); border:1px solid var(--steel-700);
+    border-radius:4px; padding:6px 8px; color:var(--steel-200); font-family:var(--mono); font-size:12px; box-sizing:border-box;
+  }
+  .process-select:focus{border-color:var(--amber);}
   .parts-input{
     all:unset; width:56px; background:var(--steel-900); border:1px solid var(--steel-700);
     border-radius:4px; padding:6px 8px; color:var(--steel-100); font-family:var(--mono); text-align:right; font-size:13px; box-sizing:border-box;
@@ -331,6 +336,7 @@
       <button class="nav-btn active" data-view="jobs"><span class="nav-dot"></span>Jobs</button>
       <button class="nav-btn" data-view="cutlist"><span class="nav-dot"></span>Cut List</button>
       <button class="nav-btn" data-view="capacity"><span class="nav-dot"></span>Capacity</button>
+      <button class="nav-btn" data-view="invoicing"><span class="nav-dot"></span>Invoicing</button>
       <button class="nav-btn" data-view="team"><span class="nav-dot"></span>Team</button>
     </div>
     <div class="sidebar-foot">v0.1 — local storage</div>
@@ -384,6 +390,17 @@
       <div class="capacity-table-wrap">
         <table class="capacity-table" id="capacity-table"></table>
       </div>
+    </div>
+
+    <!-- ===================== INVOICING VIEW ===================== -->
+    <div class="view" id="view-invoicing">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Invoicing</h1>
+          <div class="page-sub">Jobs marked done, ready to invoice. Their time no longer counts against capacity.</div>
+        </div>
+      </div>
+      <div id="invoicing-list"></div>
     </div>
 
     <!-- ===================== TEAM VIEW ===================== -->
@@ -475,6 +492,7 @@
   if(!Array.isArray(state.employees)) state.employees = [];
   state.jobs.forEach(job => {
     if(typeof job.notes !== "string") job.notes = "";
+    if(typeof job.invoiced !== "boolean") job.invoiced = false;
     job.items.forEach(item => {
       if(!Array.isArray(item.assignedTo)) item.assignedTo = item.assignedTo ? [item.assignedTo] : [];
       if(!Array.isArray(item.attachments)) item.attachments = [];
@@ -512,7 +530,8 @@
       status: "quoted",
       createdAt: new Date().toISOString(),
       items: [],
-      notes: notes || ""
+      notes: notes || "",
+      invoiced: false
     };
     state.jobs.unshift(job);
     persistState();
@@ -522,6 +541,11 @@
   function updateJobNotes(jobId, notes){
     const job = state.jobs.find(j => j.id === jobId);
     if(job){ job.notes = notes; persistState(); }
+  }
+
+  function updateJobInvoiced(jobId, invoiced){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(job){ job.invoiced = invoiced; persistState(); }
   }
 
   function deleteJob(jobId){
@@ -693,6 +717,7 @@
   const openJobIds = new Set();
 
   const STATUSES = ["quoted","scheduled","in_progress","done"];
+  const PROCESS_OPTIONS = ["Puma","Leo","X5","Router","30W Laser Engraver","20W Laser Engraver","Laser Cutting","Deburr Sander","3D Printer"];
   const STATUS_LABEL = { quoted:"Quoted", scheduled:"Scheduled", in_progress:"In progress", done:"Done" };
 
   function fmtHours(n){ return (Math.round(n*10)/10).toString(); }
@@ -786,11 +811,17 @@
 
       const itemsCards = job.items.map(item => {
         const cl = item.cutList || {};
+        const isCustomProcess = item.process && !PROCESS_OPTIONS.includes(item.process);
         return `
         <div class="item-card" data-item="${item.id}">
           <div class="item-card-row">
             <input class="item-desc-input" value="${escapeAttr(item.description)}" data-field="description" placeholder="Item name">
-            <input class="process-input" value="${escapeAttr(item.process||'')}" data-field="process" placeholder="Process">
+            <select class="process-select">
+              <option value="" ${!item.process?'selected':''}>Process…</option>
+              ${PROCESS_OPTIONS.map(p => `<option value="${p}" ${item.process===p?'selected':''}>${p}</option>`).join("")}
+              <option value="__other__" ${isCustomProcess?'selected':''}>Other…</option>
+            </select>
+            <input type="text" class="process-input process-other-input" style="display:${isCustomProcess?'flex':'none'};" value="${isCustomProcess?escapeAttr(item.process):''}" placeholder="Custom process">
             <span class="field-label">Parts</span>
             <input type="number" class="parts-input" min="0" step="1" value="${item.partsNeeded}" data-field="partsNeeded" title="Parts needed">
             <button class="btn btn-ghost btn-sm assign-btn">${escapeHtml(assignedLabel(item))}</button>
@@ -803,6 +834,8 @@
             <input class="hours-input" type="number" step="0.25" min="0" value="${item.estimatedHours}" data-field="estimatedHours">
             <span class="field-label">Actual</span>
             <span style="color:${item.actualHours > item.estimatedHours && item.estimatedHours>0 ? 'var(--red)':'var(--steel-200)'}">${fmtHours(item.actualHours)}h</span>
+            <button class="btn btn-ghost btn-sm log-time-btn" data-log="-0.25" data-scope="item">-15m</button>
+            <button class="btn btn-ghost btn-sm log-time-btn" data-log="-1" data-scope="item">-1h</button>
             <button class="btn btn-ghost btn-sm log-time-btn" data-log="0.25" data-scope="item">+15m</button>
             <button class="btn btn-ghost btn-sm log-time-btn" data-log="1" data-scope="item">+1h</button>
             <input type="number" step="0.25" min="0" class="hours-input log-time-input" placeholder="hrs">
@@ -828,6 +861,8 @@
               <input class="hours-input cut-field" type="number" step="0.25" min="0" value="${cl.estimatedHours||0}" data-cutfield="estimatedHours">
               <span class="field-label">Actual</span>
               <span>${fmtHours(cl.actualHours||0)}h</span>
+              <button class="btn btn-ghost btn-sm log-time-btn" data-log="-0.25" data-scope="cut">-15m</button>
+              <button class="btn btn-ghost btn-sm log-time-btn" data-log="-1" data-scope="cut">-1h</button>
               <button class="btn btn-ghost btn-sm log-time-btn" data-log="0.25" data-scope="cut">+15m</button>
               <button class="btn btn-ghost btn-sm log-time-btn" data-log="1" data-scope="cut">+1h</button>
               <input type="number" step="0.25" min="0" class="hours-input log-time-input-cut" placeholder="hrs">
@@ -893,7 +928,7 @@
       sel.addEventListener("change", () => {
         const jobId = sel.closest(".card").getAttribute("data-job");
         updateJobStatus(jobId, sel.value);
-        renderJobs(); renderCapacity();
+        renderJobs(); renderCapacity(); renderInvoicing();
       });
     });
 
@@ -902,7 +937,7 @@
         e.stopPropagation();
         const jobId = btn.closest(".card").getAttribute("data-job");
         if(confirm("Delete this job and all its items?")){
-          deleteJob(jobId); renderJobs(); renderCapacity();
+          deleteJob(jobId); renderJobs(); renderCapacity(); renderCutList(); renderInvoicing();
         }
       });
     });
@@ -950,6 +985,26 @@
         setCutListEnabled(jobId, itemId, e.target.checked);
         openJobIds.add(jobId);
         renderJobs(); renderCapacity(); renderCutList();
+      });
+
+      const processSelect = cardEl.querySelector(".process-select");
+      const processOtherInput = cardEl.querySelector(".process-other-input");
+      processSelect.addEventListener("change", () => {
+        if(processSelect.value === "__other__"){
+          processOtherInput.style.display = "flex";
+          processOtherInput.value = "";
+          processOtherInput.focus();
+          updateItem(jobId, itemId, { process: "" });
+          renderCapacity();
+        } else {
+          processOtherInput.style.display = "none";
+          updateItem(jobId, itemId, { process: processSelect.value });
+          renderJobs(); renderCapacity();
+        }
+      });
+      processOtherInput.addEventListener("change", () => {
+        updateItem(jobId, itemId, { process: processOtherInput.value.trim() });
+        renderCapacity();
       });
 
       cardEl.querySelector(".item-notes-input").addEventListener("change", (e) => {
@@ -1272,6 +1327,51 @@
   }
 
   /* =========================================================
+     RENDER — INVOICING VIEW
+     Jobs marked done sit here until you mark them invoiced.
+  ========================================================= */
+  const invoicingListEl = document.getElementById("invoicing-list");
+
+  function renderInvoicing(){
+    const jobs = getJobs().filter(j => j.status === "done" && !j.invoiced);
+    if(jobs.length === 0){
+      invoicingListEl.innerHTML = `
+        <div class="card">
+          <div class="empty">
+            <div class="empty-title">Nothing waiting</div>
+            <div>Jobs show up here once their status is set to Done.</div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    invoicingListEl.innerHTML = jobs.map(job => `
+      <div class="card">
+        <div class="job-head" style="cursor:default;">
+          <div class="job-title-block">
+            <div>
+              <div class="job-name">${escapeHtml(job.name)}</div>
+              <div class="job-customer">${escapeHtml(job.customer)}</div>
+            </div>
+          </div>
+          <div class="job-metrics">
+            <span><span class="lbl">Actual</span>${fmtHours(jobActual(job))}h</span>
+            <button class="btn btn-primary btn-sm mark-invoiced-btn" data-job="${job.id}">Mark invoiced</button>
+          </div>
+        </div>
+        ${job.notes ? `<div class="job-body open" style="padding-top:0;"><div style="font-size:12.5px; color:var(--steel-400); white-space:pre-wrap;">${escapeHtml(job.notes)}</div></div>` : ""}
+      </div>
+    `).join("");
+
+    invoicingListEl.querySelectorAll(".mark-invoiced-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        updateJobInvoiced(btn.getAttribute("data-job"), true);
+        renderInvoicing();
+      });
+    });
+  }
+
+  /* =========================================================
      RENDER — CAPACITY VIEW
      Spreads each job item's remaining hours evenly across the
      working days between today and its job's due date.
@@ -1297,12 +1397,15 @@
     }
 
     const employees = getEmployees();
-    const rows = [...employees.map(e => ({ id:e.id, name:e.name })), { id:"__unassigned__", name:"Unassigned" }];
+    const peopleRows = [...employees.map(e => ({ id:e.id, name:e.name })), { id:"__unassigned__", name:"Unassigned" }];
+    const machineRows = PROCESS_OPTIONS.map(p => ({ id:"machine:"+p, name:p }));
 
     const hours = {};
-    rows.forEach(r => hours[r.id] = days.map(()=>0));
+    [...peopleRows, ...machineRows].forEach(r => hours[r.id] = days.map(()=>0));
 
-    const jobs = getJobs().filter(j => j.status !== "done");
+    // Only scheduled or in-progress jobs count toward capacity — quoted work isn't committed yet,
+    // and done work no longer needs machine or staff time reserved for it.
+    const jobs = getJobs().filter(j => j.status === "scheduled" || j.status === "in_progress");
     jobs.forEach(job => {
       let targetDays = days;
       if(job.due){
@@ -1330,6 +1433,13 @@
             targetDays.forEach(d => { hours[empId][days.indexOf(d)] += perDay; });
           });
         });
+
+        // machine load — the operation ties up the machine itself regardless of who's running it
+        if(mainRemaining > 0 && item.process && PROCESS_OPTIONS.includes(item.process)){
+          const machineKey = "machine:" + item.process;
+          const perDay = mainRemaining / targetDays.length;
+          targetDays.forEach(d => { hours[machineKey][days.indexOf(d)] += perDay; });
+        }
       });
     });
 
@@ -1348,21 +1458,26 @@
       </th>`;
     }).join("");
 
-    const bodyRows = rows.map(r => {
+    function rowHtml(r){
       const cells = hours[r.id].map(v => `<td class="capacity-cell ${cellClass(v)}">${v>0?fmtHours(v)+'h':'—'}</td>`).join("");
       return `<tr><td class="emp-col">${escapeHtml(r.name)}</td>${cells}</tr>`;
-    }).join("");
+    }
+
+    const peopleBodyRows = peopleRows.map(rowHtml).join("");
+    const machineBodyRows = machineRows.map(rowHtml).join("");
 
     const totalCells = days.map((d,idx) => {
-      const total = rows.reduce((s,r)=> s + hours[r.id][idx], 0);
+      const total = peopleRows.reduce((s,r)=> s + hours[r.id][idx], 0);
       return `<td class="capacity-cell">${total>0?fmtHours(total)+'h':'—'}</td>`;
     }).join("");
 
     capacityTableEl.innerHTML = `
       <thead><tr><th class="emp-col">Team</th>${headerCells}</tr></thead>
       <tbody>
-        ${bodyRows}
+        ${peopleBodyRows}
         <tr class="capacity-total-row"><td class="emp-col">Total</td>${totalCells}</tr>
+        <tr><td class="emp-col" colspan="${days.length+1}" style="background:var(--steel-800); color:var(--steel-400); font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; position:static;">Machines</td></tr>
+        ${machineBodyRows}
       </tbody>`;
   }
 
@@ -1384,6 +1499,7 @@
       if(btn.getAttribute("data-view") === "capacity") renderCapacity();
       if(btn.getAttribute("data-view") === "team") renderTeam();
       if(btn.getAttribute("data-view") === "cutlist") renderCutList();
+      if(btn.getAttribute("data-view") === "invoicing") renderInvoicing();
     });
   });
 
@@ -1436,6 +1552,7 @@
   renderCapacity();
   renderTeam();
   renderCutList();
+  renderInvoicing();
 })();
 </script>
 </body>
