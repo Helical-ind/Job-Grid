@@ -207,6 +207,29 @@
     border:1px solid var(--steel-700); border-radius:3px; padding:4px 7px; color:var(--steel-100); text-align:center;
   }
 
+  /* ---------- popover (assign / files) ---------- */
+  .popover{
+    position:fixed; z-index:60; min-width:210px; max-width:280px;
+    background:var(--steel-900); border:1px solid var(--steel-700); border-radius:6px;
+    padding:10px; box-shadow:0 8px 24px rgba(0,0,0,.4);
+  }
+  .popover-title{
+    font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--steel-600);
+    margin-bottom:8px; font-weight:600;
+  }
+  .popover-check-row{
+    display:flex; align-items:center; gap:8px; padding:5px 2px; font-size:13px; cursor:pointer;
+  }
+  .popover-check-row input{accent-color:var(--amber);}
+  .popover-file-row{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:5px 2px; font-size:12.5px; border-bottom:1px solid var(--steel-800);
+  }
+  .popover-file-row a{color:var(--amber); text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:120px;}
+  .popover-file-row span{color:var(--steel-600); font-family:var(--mono); font-size:11px; white-space:nowrap;}
+  .popover-actions{margin-top:8px;}
+  .popover-note{font-size:10.5px; color:var(--steel-600); margin-top:6px;}
+
   @media (max-width:720px){
     .app{flex-direction:column;}
     .sidebar{width:100%; flex-direction:row; align-items:center; padding:10px 14px; overflow-x:auto;}
@@ -228,6 +251,7 @@
     <div class="nav">
       <button class="nav-btn active" data-view="jobs"><span class="nav-dot"></span>Jobs</button>
       <button class="nav-btn" data-view="capacity"><span class="nav-dot"></span>Capacity</button>
+      <button class="nav-btn" data-view="team"><span class="nav-dot"></span>Team</button>
     </div>
     <div class="sidebar-foot">v0.1 — local storage</div>
   </div>
@@ -261,8 +285,23 @@
         Daily capacity
         <input type="number" id="daily-capacity" min="1" step="0.5">
         hrs/day
+        <select class="machine-select" id="capacity-employee-filter" style="margin-left:10px;"></select>
       </div>
       <div class="capacity-grid" id="capacity-grid"></div>
+    </div>
+
+    <!-- ===================== TEAM VIEW ===================== -->
+    <div class="view" id="view-team">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Team</h1>
+          <div class="page-sub">Add employees so jobs and items can be allocated to someone.</div>
+        </div>
+        <button class="btn btn-primary" id="btn-new-employee">+ New employee</button>
+      </div>
+      <div class="card" id="employees-card">
+        <div id="employees-list"></div>
+      </div>
     </div>
 
   </div>
@@ -291,6 +330,23 @@
   </div>
 </div>
 
+<!-- ===================== NEW EMPLOYEE MODAL ===================== -->
+<div class="modal-backdrop" id="modal-new-employee">
+  <div class="modal">
+    <h3>New employee</h3>
+    <div class="field">
+      <label>Name</label>
+      <input type="text" id="ne-name" placeholder="e.g. Dave Mitchell">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="ne-cancel">Cancel</button>
+      <button class="btn btn-primary" id="ne-save">Add employee</button>
+    </div>
+  </div>
+</div>
+
+<div class="popover" id="popover" style="display:none;"></div>
+
 <script>
 (function(){
   "use strict";
@@ -308,14 +364,19 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       if(raw) return JSON.parse(raw);
     }catch(e){ console.error("Failed to load state", e); }
-    return { jobs: [], settings: { dailyCapacityHours: 8 } };
+    return { jobs: [], employees: [], settings: { dailyCapacityHours: 8 } };
   }
   function persistState(){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch(e){ console.error("Failed to save state", e); }
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); return true; }
+    catch(e){ console.error("Failed to save state", e); return false; }
   }
 
   let state = loadState();
+  if(!Array.isArray(state.employees)) state.employees = [];
+  state.jobs.forEach(job => job.items.forEach(item => {
+    if(!Array.isArray(item.assignedTo)) item.assignedTo = item.assignedTo ? [item.assignedTo] : [];
+    if(!Array.isArray(item.attachments)) item.attachments = [];
+  }));
 
   function uid(prefix){
     return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
@@ -356,7 +417,9 @@
       description: item.description || "New item",
       machine: item.machine || "laser",
       estimatedHours: Number(item.estimatedHours) || 0,
-      actualHours: 0
+      actualHours: 0,
+      assignedTo: Array.isArray(item.assignedTo) ? item.assignedTo : [],
+      attachments: []
     });
     persistState();
   }
@@ -391,6 +454,54 @@
     persistState();
   }
 
+  function getEmployees(){ return state.employees; }
+
+  function saveEmployee(name){
+    const employee = { id: uid("emp"), name: name || "Unnamed" };
+    state.employees.push(employee);
+    persistState();
+    return employee;
+  }
+
+  function deleteEmployee(employeeId){
+    state.employees = state.employees.filter(e => e.id !== employeeId);
+    // unassign anyone pointing at this employee, rather than leaving a dangling id
+    state.jobs.forEach(job => job.items.forEach(item => {
+      item.assignedTo = (item.assignedTo || []).filter(id => id !== employeeId);
+    }));
+    persistState();
+  }
+
+  function setItemAssignments(jobId, itemId, employeeIds){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return;
+    item.assignedTo = employeeIds;
+    persistState();
+  }
+
+  function addAttachmentToItem(jobId, itemId, attachment){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return false;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return false;
+    if(!item.attachments) item.attachments = [];
+    item.attachments.push(attachment);
+    const ok = persistState();
+    if(!ok) item.attachments.pop();
+    return ok;
+  }
+
+  function removeAttachmentFromItem(jobId, itemId, attachmentId){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return;
+    item.attachments = (item.attachments || []).filter(a => a.id !== attachmentId);
+    persistState();
+  }
+
   /* helper roll-ups */
   function jobEstimated(job){ return job.items.reduce((s,i)=>s+(Number(i.estimatedHours)||0),0); }
   function jobActual(job){ return job.items.reduce((s,i)=>s+(Number(i.actualHours)||0),0); }
@@ -411,6 +522,21 @@
   const STATUS_LABEL = { quoted:"Quoted", scheduled:"Scheduled", in_progress:"In progress", done:"Done" };
 
   function fmtHours(n){ return (Math.round(n*10)/10).toString(); }
+
+  function fmtBytes(n){
+    if(n < 1024) return n + " B";
+    if(n < 1024*1024) return (n/1024).toFixed(1) + " KB";
+    return (n/1024/1024).toFixed(1) + " MB";
+  }
+
+  function assignedLabel(item){
+    const names = (item.assignedTo || [])
+      .map(id => { const e = getEmployees().find(x => x.id === id); return e ? e.name : null; })
+      .filter(Boolean);
+    if(names.length === 0) return "Unassigned";
+    if(names.length === 1) return names[0];
+    return names.length + " assigned";
+  }
 
   function daysUntil(dateStr){
     if(!dateStr) return null;
@@ -476,6 +602,8 @@
               ${MACHINES.map(([v,l]) => `<option value="${v}" ${item.machine===v?'selected':''}>${l}</option>`).join("")}
             </select>
           </td>
+          <td><button class="btn btn-ghost btn-sm assign-btn">${escapeHtml(assignedLabel(item))}</button></td>
+          <td><button class="btn btn-ghost btn-sm files-btn">📎${item.attachments && item.attachments.length ? ' '+item.attachments.length : ''}</button></td>
           <td class="num"><input class="hours-input" type="number" step="0.25" min="0" value="${item.estimatedHours}" data-field="estimatedHours"></td>
           <td class="num" style="font-family:var(--mono); color:${item.actualHours > item.estimatedHours && item.estimatedHours>0 ? 'var(--red)':'var(--steel-200)'}">${fmtHours(item.actualHours)}</td>
           <td class="num">
@@ -508,12 +636,12 @@
         <div class="job-body ${openJobIds.has(job.id)?'open':''}">
           <table>
             <thead>
-              <tr><th>Item</th><th>Machine</th><th style="text-align:right">Est. hrs</th><th style="text-align:right">Actual</th><th></th><th></th></tr>
+              <tr><th>Item</th><th>Machine</th><th>Assigned</th><th>Files</th><th style="text-align:right">Est. hrs</th><th style="text-align:right">Actual</th><th></th><th></th></tr>
             </thead>
             <tbody>
               ${itemsRows}
               <tr class="add-item-row">
-                <td colspan="6"><button class="btn btn-ghost btn-sm add-item-btn">+ Add item</button></td>
+                <td colspan="8"><button class="btn btn-ghost btn-sm add-item-btn">+ Add item</button></td>
               </tr>
             </tbody>
           </table>
@@ -562,7 +690,7 @@
     jobsListEl.querySelectorAll(".add-item-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         const jobId = btn.closest(".card").getAttribute("data-job");
-        addItem(jobId, { description:"New item", machine:"laser", estimatedHours:1 });
+        addItem(jobId, { description:"New item", machine:"laser", estimatedHours:1, assignedTo:[] });
         openJobIds.add(jobId);
         renderJobs(); renderCapacity();
       });
@@ -596,21 +724,217 @@
         openJobIds.add(jobId);
         renderJobs(); renderCapacity();
       });
+
+      row.querySelector(".assign-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        openPopoverAt(e.currentTarget, buildAssignPopoverHtml(jobId, itemId));
+        wireAssignPopover(jobId, itemId, e.currentTarget);
+      });
+
+      row.querySelector(".files-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        openPopoverAt(e.currentTarget, buildFilesPopoverHtml(jobId, itemId));
+        wireFilesPopover(jobId, itemId, e.currentTarget);
+      });
+    });
+  }
+
+  /* =========================================================
+     POPOVER — shared panel for "assign staff" and "files"
+  ========================================================= */
+  const popoverEl = document.getElementById("popover");
+  let popoverCloseHandler = null;
+
+  function closePopover(){
+    popoverEl.style.display = "none";
+    popoverEl.innerHTML = "";
+    if(popoverCloseHandler){ document.removeEventListener("click", popoverCloseHandler, true); popoverCloseHandler = null; }
+  }
+
+  function openPopoverAt(btn, html){
+    popoverEl.innerHTML = html;
+    popoverEl.style.display = "block";
+    const rect = btn.getBoundingClientRect();
+    popoverEl.style.top = (rect.bottom + 6) + "px";
+    popoverEl.style.left = rect.left + "px";
+    requestAnimationFrame(() => {
+      const pRect = popoverEl.getBoundingClientRect();
+      if(pRect.right > window.innerWidth - 10){
+        popoverEl.style.left = Math.max(10, window.innerWidth - pRect.width - 10) + "px";
+      }
+      if(pRect.bottom > window.innerHeight - 10){
+        popoverEl.style.top = Math.max(10, rect.top - pRect.height - 6) + "px";
+      }
+    });
+    if(popoverCloseHandler) document.removeEventListener("click", popoverCloseHandler, true);
+    popoverCloseHandler = (e) => {
+      if(!popoverEl.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closePopover();
+    };
+    setTimeout(() => document.addEventListener("click", popoverCloseHandler, true), 0);
+  }
+
+  function buildAssignPopoverHtml(jobId, itemId){
+    const job = getJobs().find(j => j.id === jobId);
+    const item = job.items.find(i => i.id === itemId);
+    const emps = getEmployees();
+    if(emps.length === 0){
+      return `<div class="popover-title">Assign staff</div><div class="popover-note">No employees yet — add your team on the Team tab.</div>`;
+    }
+    return `<div class="popover-title">Assign staff</div>` + emps.map(emp => `
+      <label class="popover-check-row">
+        <input type="checkbox" data-emp="${emp.id}" ${item.assignedTo.includes(emp.id) ? 'checked' : ''}>
+        ${escapeHtml(emp.name)}
+      </label>
+    `).join("");
+  }
+
+  function wireAssignPopover(jobId, itemId, btn){
+    popoverEl.querySelectorAll("input[type=checkbox][data-emp]").forEach(cb => {
+      cb.addEventListener("change", () => {
+        const job = getJobs().find(j => j.id === jobId);
+        const item = job.items.find(i => i.id === itemId);
+        const empId = cb.getAttribute("data-emp");
+        const set = new Set(item.assignedTo);
+        if(cb.checked) set.add(empId); else set.delete(empId);
+        setItemAssignments(jobId, itemId, Array.from(set));
+        btn.textContent = assignedLabel(item);
+        renderCapacity(); renderTeam();
+      });
+    });
+  }
+
+  function buildFilesPopoverHtml(jobId, itemId){
+    const job = getJobs().find(j => j.id === jobId);
+    const item = job.items.find(i => i.id === itemId);
+    const atts = item.attachments || [];
+    const rows = atts.length === 0
+      ? `<div class="popover-note">No files attached.</div>`
+      : atts.map(a => `
+          <div class="popover-file-row">
+            <a href="${a.dataUrl}" download="${escapeAttr(a.name)}" target="_blank">${escapeHtml(a.name)}</a>
+            <span>${fmtBytes(a.size)}</span>
+            <button class="btn btn-danger btn-sm del-att-btn" data-att="${a.id}">✕</button>
+          </div>
+        `).join("");
+    return `<div class="popover-title">Files</div>${rows}
+      <div class="popover-actions">
+        <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
+          + Add file
+          <input type="file" class="att-file-input" style="display:none;">
+        </label>
+      </div>
+      <div class="popover-note">Under ~2MB per file — stored in the browser.</div>`;
+  }
+
+  function wireFilesPopover(jobId, itemId, btn){
+    popoverEl.querySelectorAll(".del-att-btn").forEach(b => {
+      b.addEventListener("click", () => {
+        removeAttachmentFromItem(jobId, itemId, b.getAttribute("data-att"));
+        const job = getJobs().find(j => j.id === jobId);
+        const item = job.items.find(i => i.id === itemId);
+        btn.textContent = "📎" + (item.attachments.length ? " " + item.attachments.length : "");
+        openPopoverAt(btn, buildFilesPopoverHtml(jobId, itemId));
+        wireFilesPopover(jobId, itemId, btn);
+      });
+    });
+    const fileInput = popoverEl.querySelector(".att-file-input");
+    if(fileInput){
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files[0];
+        if(!file) return;
+        if(file.size > 5*1024*1024){
+          alert("That file is over 5MB — please choose something smaller. Local storage can't reliably hold large files.");
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const ok = addAttachmentToItem(jobId, itemId, {
+            id: uid("att"), name: file.name, type: file.type, size: file.size, dataUrl: reader.result
+          });
+          if(!ok){
+            alert("Couldn't save that file — local storage is full. Remove an old attachment or use a smaller file.");
+            return;
+          }
+          const job = getJobs().find(j => j.id === jobId);
+          const item = job.items.find(i => i.id === itemId);
+          btn.textContent = "📎 " + item.attachments.length;
+          openPopoverAt(btn, buildFilesPopoverHtml(jobId, itemId));
+          wireFilesPopover(jobId, itemId, btn);
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  }
+
+  /* =========================================================
+     RENDER — TEAM VIEW
+  ========================================================= */
+  const employeesListEl = document.getElementById("employees-list");
+
+  function renderTeam(){
+    const employees = getEmployees();
+    if(employees.length === 0){
+      employeesListEl.innerHTML = `
+        <div class="empty">
+          <div class="empty-title">No employees yet</div>
+          <div>Add your team so jobs and items can be allocated to someone.</div>
+        </div>`;
+      return;
+    }
+
+    employeesListEl.innerHTML = `<table>
+      <thead><tr><th>Name</th><th style="text-align:right">Hours remaining allocated</th><th></th></tr></thead>
+      <tbody>
+        ${employees.map(emp => {
+          const remaining = getJobs().reduce((sum, job) => {
+            if(job.status === "done") return sum;
+            return sum + job.items
+              .filter(i => (i.assignedTo || []).includes(emp.id))
+              .reduce((s,i)=> s + Math.max(0, (Number(i.estimatedHours)||0) - (Number(i.actualHours)||0)), 0);
+          }, 0);
+          return `
+          <tr data-employee="${emp.id}">
+            <td>${escapeHtml(emp.name)}</td>
+            <td class="num">${fmtHours(remaining)}h</td>
+            <td class="num"><button class="btn btn-danger del-employee-btn">✕</button></td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>`;
+
+    employeesListEl.querySelectorAll(".del-employee-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const employeeId = btn.closest("tr").getAttribute("data-employee");
+        if(confirm("Remove this employee? Their assigned items will become unassigned.")){
+          deleteEmployee(employeeId);
+          renderTeam(); renderJobs(); renderCapacity();
+        }
+      });
     });
   }
 
   /* =========================================================
      RENDER — CAPACITY VIEW
-     Spreads each job's remaining hours evenly across the
-     working days between today and its due date.
+     Spreads each job item's remaining hours evenly across the
+     working days between today and its job's due date.
   ========================================================= */
   const capacityGridEl = document.getElementById("capacity-grid");
   const dailyCapInput = document.getElementById("daily-capacity");
+  const capacityEmployeeFilterEl = document.getElementById("capacity-employee-filter");
 
   function isWeekday(date){ const d = date.getDay(); return d !== 0 && d !== 6; }
 
   function renderCapacity(){
     dailyCapInput.value = state.settings.dailyCapacityHours;
+
+    const currentFilter = capacityEmployeeFilterEl.value || "";
+    capacityEmployeeFilterEl.innerHTML = `
+      <option value="">All employees</option>
+      <option value="__unassigned__">Unassigned</option>
+      ${getEmployees().map(emp => `<option value="${emp.id}">${escapeHtml(emp.name)}</option>`).join("")}
+    `;
+    capacityEmployeeFilterEl.value = currentFilter;
+    const employeeFilter = capacityEmployeeFilterEl.value;
 
     const today = new Date(); today.setHours(0,0,0,0);
     const days = [];
@@ -620,18 +944,24 @@
       if(days.length >= 7) break;
     }
 
-    const jobs = getJobs().filter(j => j.status !== "done" && jobRemaining(j) > 0);
+    const jobs = getJobs().filter(j => j.status !== "done");
 
     jobs.forEach(job => {
-      const remaining = jobRemaining(job);
       let targetDays = days;
       if(job.due){
         const due = new Date(job.due + "T00:00:00");
         const inWindow = days.filter(d => d.date <= due);
         if(inWindow.length) targetDays = inWindow;
       }
-      const perDay = remaining / targetDays.length;
-      targetDays.forEach(d => d.jobs.push({ name: job.name, hours: perDay }));
+      job.items.forEach(item => {
+        const assigned = item.assignedTo || [];
+        if(employeeFilter === "__unassigned__" && assigned.length > 0) return;
+        if(employeeFilter && employeeFilter !== "__unassigned__" && !assigned.includes(employeeFilter)) return;
+        const remaining = Math.max(0, (Number(item.estimatedHours)||0) - (Number(item.actualHours)||0));
+        if(remaining <= 0) return;
+        const perDay = remaining / targetDays.length;
+        targetDays.forEach(d => d.jobs.push({ name: job.name, hours: perDay }));
+      });
     });
 
     const cap = state.settings.dailyCapacityHours;
@@ -675,8 +1005,11 @@
       btn.classList.add("active");
       document.getElementById("view-" + btn.getAttribute("data-view")).classList.add("active");
       if(btn.getAttribute("data-view") === "capacity") renderCapacity();
+      if(btn.getAttribute("data-view") === "team") renderTeam();
     });
   });
+
+  capacityEmployeeFilterEl.addEventListener("change", renderCapacity);
 
   const modal = document.getElementById("modal-new-job");
   document.getElementById("btn-new-job").addEventListener("click", () => {
@@ -701,11 +1034,29 @@
     renderJobs(); renderCapacity();
   });
 
+  const employeeModal = document.getElementById("modal-new-employee");
+  document.getElementById("btn-new-employee").addEventListener("click", () => {
+    document.getElementById("ne-name").value = "";
+    employeeModal.classList.add("open");
+    document.getElementById("ne-name").focus();
+  });
+  document.getElementById("ne-cancel").addEventListener("click", () => employeeModal.classList.remove("open"));
+  employeeModal.addEventListener("click", e => { if(e.target === employeeModal) employeeModal.classList.remove("open"); });
+  document.getElementById("ne-save").addEventListener("click", () => {
+    const nameInput = document.getElementById("ne-name");
+    const name = nameInput.value.trim();
+    if(!name){ nameInput.focus(); return; }
+    saveEmployee(name);
+    employeeModal.classList.remove("open");
+    renderTeam(); renderJobs();
+  });
+
   /* =========================================================
      INIT
   ========================================================= */
   renderJobs();
   renderCapacity();
+  renderTeam();
 })();
 </script>
 </body>
