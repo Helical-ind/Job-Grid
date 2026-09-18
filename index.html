@@ -238,9 +238,10 @@
   }
   .process-select:focus{border-color:var(--amber);}
   .material-select{
-    all:unset; flex:1 1 130px; min-width:110px; background:var(--steel-900); border:1px solid var(--steel-700);
+    all:unset; flex:1 1 90px; min-width:80px; background:var(--steel-900); border:1px solid var(--steel-700);
     border-radius:4px; padding:6px 8px; color:var(--steel-200); font-family:var(--mono); font-size:12px; box-sizing:border-box;
   }
+  .material-select:disabled{opacity:.45;}
   .material-select:focus{border-color:var(--amber);}
   .cut-length-input{width:76px;}
   .parts-input{
@@ -596,6 +597,19 @@
         };
       }
       if(item.cutList.materialId === undefined) item.cutList.materialId = null;
+      if(item.cutList.materialShape === undefined) item.cutList.materialShape = "";
+      if(item.cutList.materialSizeKey === undefined) item.cutList.materialSizeKey = "";
+      if(!item.cutList.materialShape){
+        if(item.cutList.materialId){
+          const stockMatch = state.materials.find(m => m.id === item.cutList.materialId);
+          if(stockMatch){
+            item.cutList.materialShape = stockMatch.profile;
+            item.cutList.materialSizeKey = materialDimsKey(stockMatch);
+          }
+        } else if(item.cutList.material){
+          item.cutList.materialShape = "__other__";
+        }
+      }
     });
   });
 
@@ -644,7 +658,7 @@
 
   function ensureCutList(item){
     if(!item.cutList){
-      item.cutList = { enabled:false, quantity:0, material:"", materialId:null, dimension:"", length:0, estimatedHours:0, actualHours:0, assignedTo:[] };
+      item.cutList = { enabled:false, quantity:0, material:"", materialId:null, materialShape:"", materialSizeKey:"", dimension:"", length:0, estimatedHours:0, actualHours:0, assignedTo:[] };
     }
     return item.cutList;
   }
@@ -662,7 +676,7 @@
       attachments: [],
       notes: item.notes || "",
       partsNeeded: item.partsNeeded !== undefined ? Number(item.partsNeeded) : 1,
-      cutList: { enabled:false, quantity:0, material:"", materialId:null, dimension:"", length:0, estimatedHours:0, actualHours:0, assignedTo:[] }
+      cutList: { enabled:false, quantity:0, material:"", materialId:null, materialShape:"", materialSizeKey:"", dimension:"", length:0, estimatedHours:0, actualHours:0, assignedTo:[] }
     });
     persistState();
   }
@@ -884,6 +898,16 @@
     return "";
   }
 
+  function materialDimsKey(m){
+    if(m.profile === "round") return String(m.diameter);
+    if(m.profile === "square") return `${m.width}x${m.height}`;
+    if(m.profile === "hex") return String(m.acrossFlats);
+    if(m.profile === "hollow") return `${m.od}x${m.innerDiameter}`;
+    return "";
+  }
+
+  const SHAPE_LABEL = { round:"Round", square:"Square/Rect", hex:"Hex", hollow:"Hollow" };
+
   function materialLabel(m){
     return `${materialDimsLabel(m)} ${materialTypeLabel(m)}`.trim();
   }
@@ -947,8 +971,14 @@
       const itemsCards = job.items.map(item => {
         const cl = item.cutList || {};
         const isCustomProcess = item.process && !PROCESS_OPTIONS.includes(item.process);
-        const matchedStock = cl.materialId ? getMaterials().find(m => m.id === cl.materialId) : null;
-        const isCustomMat = !matchedStock && !!cl.material;
+        const matShape = cl.materialShape || "";
+        const matSizeKey = cl.materialSizeKey || "";
+        const sizeOptions = (matShape && matShape !== "__other__")
+          ? [...new Map(getMaterials().filter(m => m.profile === matShape).map(m => [materialDimsKey(m), materialDimsLabel(m)])).entries()]
+          : [];
+        const typeMats = (matShape && matShape !== "__other__" && matSizeKey)
+          ? getMaterials().filter(m => m.profile === matShape && materialDimsKey(m) === matSizeKey)
+          : [];
         return `
         <div class="item-card" data-item="${item.id}">
           <div class="item-card-row">
@@ -987,17 +1017,27 @@
           <div class="cutlist-sub" style="display:${cl.enabled?'flex':'none'}">
             <div class="cutlist-sub-title">Cut prep</div>
             <div class="item-card-row">
-              <span class="field-label">Cut qty</span>
-              <input type="number" class="parts-input cut-field" min="0" step="1" value="${cl.quantity||0}" data-cutfield="quantity" title="Cut quantity, including any setup allowance">
-              <select class="material-select" style="flex:1 1 130px;">
-                <option value="" ${!cl.materialId && !cl.material ? 'selected':''}>Material…</option>
-                ${getMaterials().map(m => `<option value="${m.id}" ${cl.materialId===m.id?'selected':''}>${escapeHtml(materialLabel(m))}${m.inStock?'':' (out of stock)'}</option>`).join("")}
-                <option value="__other__" ${isCustomMat?'selected':''}>Other…</option>
+              <select class="material-select material-shape-select">
+                <option value="" ${!matShape?'selected':''}>Shape…</option>
+                <option value="round" ${matShape==='round'?'selected':''}>Round</option>
+                <option value="square" ${matShape==='square'?'selected':''}>Square/Rect</option>
+                <option value="hex" ${matShape==='hex'?'selected':''}>Hex</option>
+                <option value="hollow" ${matShape==='hollow'?'selected':''}>Hollow</option>
+                <option value="__other__" ${matShape==='__other__'?'selected':''}>Other…</option>
               </select>
-              <input type="text" class="process-input material-other-input" style="display:${isCustomMat?'flex':'none'};" value="${isCustomMat?escapeAttr(cl.material):''}" placeholder="Custom material">
-              <input type="text" class="process-input cut-field" style="flex:1 1 100px;" value="${escapeAttr(cl.dimension||'')}" placeholder="Dimension" data-cutfield="dimension">
+              <select class="material-select material-size-select" ${sizeOptions.length===0?'disabled':''}>
+                <option value="">Size…</option>
+                ${sizeOptions.map(([key,label]) => `<option value="${escapeAttr(key)}" ${matSizeKey===key?'selected':''}>${escapeHtml(label)}</option>`).join("")}
+              </select>
+              <select class="material-select material-type-select" ${typeMats.length===0?'disabled':''}>
+                <option value="">Type…</option>
+                ${typeMats.map(m => `<option value="${m.id}" ${cl.materialId===m.id?'selected':''}>${escapeHtml(materialTypeLabel(m))}${m.inStock?'':' (out of stock)'}</option>`).join("")}
+              </select>
+              <input type="text" class="process-input material-other-input" style="display:${matShape==='__other__'?'flex':'none'};" value="${matShape==='__other__'?escapeAttr(cl.material):''}" placeholder="Custom material">
               <span class="field-label">Length</span>
               <input type="number" class="parts-input cut-field cut-length-input" min="0" step="1" value="${cl.length||''}" placeholder="mm" data-cutfield="length" title="Cut length per piece, mm">
+              <span class="field-label" style="margin-left:auto;">Cut qty</span>
+              <input type="number" class="parts-input cut-field" min="0" step="1" value="${cl.quantity||0}" data-cutfield="quantity" title="Cut quantity, including any setup allowance">
             </div>
             <div class="item-card-row item-hours-row">
               <span class="field-label">Est</span>
@@ -1150,29 +1190,37 @@
         renderCapacity();
       });
 
-      const materialSelect = cardEl.querySelector(".material-select");
+      const shapeSelect = cardEl.querySelector(".material-shape-select");
+      const sizeSelect = cardEl.querySelector(".material-size-select");
+      const typeSelect = cardEl.querySelector(".material-type-select");
       const materialOtherInput = cardEl.querySelector(".material-other-input");
-      if(materialSelect){
-        materialSelect.addEventListener("change", () => {
-          if(materialSelect.value === "__other__"){
-            materialOtherInput.style.display = "flex";
-            materialOtherInput.value = "";
-            materialOtherInput.focus();
-            updateCutListField(jobId, itemId, "materialId", null);
-            updateCutListField(jobId, itemId, "material", "");
-            renderCutList();
-          } else if(materialSelect.value === ""){
-            materialOtherInput.style.display = "none";
-            updateCutListField(jobId, itemId, "materialId", null);
-            updateCutListField(jobId, itemId, "material", "");
-            renderCutList();
-          } else {
-            materialOtherInput.style.display = "none";
-            const mat = getMaterials().find(m => m.id === materialSelect.value);
-            updateCutListField(jobId, itemId, "materialId", materialSelect.value);
+      if(shapeSelect){
+        shapeSelect.addEventListener("change", () => {
+          updateCutListField(jobId, itemId, "materialShape", shapeSelect.value);
+          updateCutListField(jobId, itemId, "materialSizeKey", "");
+          updateCutListField(jobId, itemId, "materialId", null);
+          updateCutListField(jobId, itemId, "material", "");
+          openJobIds.add(jobId);
+          renderJobs(); renderCutList(); renderCapacity();
+        });
+        sizeSelect.addEventListener("change", () => {
+          updateCutListField(jobId, itemId, "materialSizeKey", sizeSelect.value);
+          updateCutListField(jobId, itemId, "materialId", null);
+          updateCutListField(jobId, itemId, "material", "");
+          openJobIds.add(jobId);
+          renderJobs(); renderCutList(); renderCapacity();
+        });
+        typeSelect.addEventListener("change", () => {
+          if(typeSelect.value){
+            const mat = getMaterials().find(m => m.id === typeSelect.value);
+            updateCutListField(jobId, itemId, "materialId", typeSelect.value);
             updateCutListField(jobId, itemId, "material", mat ? materialLabel(mat) : "");
-            renderCutList();
+          } else {
+            updateCutListField(jobId, itemId, "materialId", null);
+            updateCutListField(jobId, itemId, "material", "");
           }
+          openJobIds.add(jobId);
+          renderJobs(); renderCutList(); renderCapacity();
         });
         materialOtherInput.addEventListener("change", () => {
           updateCutListField(jobId, itemId, "material", materialOtherInput.value.trim());
@@ -1510,7 +1558,7 @@
         map[key].qty += qty;
         map[key].totalLength += qty * len;
         map[key].lines.push({
-          jobName: job.name, desc: item.description, dimension: cl.dimension || "",
+          jobName: job.name, desc: item.description,
           qty, len, assigned: cutAssignedLabel(item)
         });
       });
@@ -1556,9 +1604,9 @@
         <div class="job-body open">
           <div style="overflow-x:auto;">
           <table>
-            <thead><tr><th>Job</th><th>Item</th><th>Dimension</th><th style="text-align:right">Qty</th><th style="text-align:right">Length ea.</th><th>Assigned</th></tr></thead>
+            <thead><tr><th>Job</th><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Length ea.</th><th>Assigned</th></tr></thead>
             <tbody>
-              ${g.lines.map(l => `<tr><td>${escapeHtml(l.jobName)}</td><td>${escapeHtml(l.desc)}</td><td>${escapeHtml(l.dimension)}</td><td class="num">${l.qty}</td><td class="num">${fmtLength(l.len)}</td><td>${escapeHtml(l.assigned)}</td></tr>`).join("")}
+              ${g.lines.map(l => `<tr><td>${escapeHtml(l.jobName)}</td><td>${escapeHtml(l.desc)}</td><td class="num">${l.qty}</td><td class="num">${fmtLength(l.len)}</td><td>${escapeHtml(l.assigned)}</td></tr>`).join("")}
             </tbody>
           </table>
           </div>
