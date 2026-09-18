@@ -207,6 +207,32 @@
     border:1px solid var(--steel-700); border-radius:3px; padding:4px 7px; color:var(--steel-100); text-align:center;
   }
 
+  .capacity-table-wrap{
+    overflow-x:auto; border:1px solid var(--steel-700); border-radius:6px; background:var(--steel-900);
+  }
+  table.capacity-table{border-collapse:collapse; width:100%; min-width:600px;}
+  .capacity-table th, .capacity-table td{
+    padding:9px 12px; text-align:center; white-space:nowrap;
+    border-bottom:1px solid var(--steel-800); border-right:1px solid var(--steel-800);
+    font-family:var(--mono); font-size:12.5px;
+  }
+  .capacity-table thead th{
+    background:var(--steel-900); font-size:10.5px; text-transform:uppercase; letter-spacing:.03em;
+    color:var(--steel-400); font-family:var(--sans); font-weight:600; padding:8px 12px;
+  }
+  .capacity-table thead th.today-col{color:var(--amber);}
+  .capacity-table th.emp-col, .capacity-table td.emp-col{
+    position:sticky; left:0; z-index:2; background:var(--steel-900);
+    text-align:left; font-family:var(--sans); font-weight:600; font-size:13px;
+    border-right:1px solid var(--steel-700); color:var(--steel-100);
+  }
+  .capacity-cell.zero{color:var(--steel-700);}
+  .capacity-cell.ok{color:var(--steel-200);}
+  .capacity-cell.warn{background:rgba(232,131,12,.12); color:var(--amber); font-weight:600;}
+  .capacity-cell.bad{background:rgba(201,74,63,.14); color:var(--red); font-weight:600;}
+  .capacity-total-row td{font-weight:600; border-top:2px solid var(--steel-700); background:rgba(255,255,255,.02);}
+  .capacity-total-row td.emp-col{background:var(--steel-800);}
+
   /* ---------- popover (assign / files) ---------- */
   .popover{
     position:fixed; z-index:60; min-width:210px; max-width:280px;
@@ -284,10 +310,15 @@
       <div class="capacity-setting">
         Daily capacity
         <input type="number" id="daily-capacity" min="1" step="0.5">
-        hrs/day
-        <select class="machine-select" id="capacity-employee-filter" style="margin-left:10px;"></select>
+        hrs/day per person
+        <label style="margin-left:16px; display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="checkbox" id="capacity-month-toggle" style="accent-color:var(--amber); width:auto;">
+          Show full month
+        </label>
       </div>
-      <div class="capacity-grid" id="capacity-grid"></div>
+      <div class="capacity-table-wrap">
+        <table class="capacity-table" id="capacity-table"></table>
+      </div>
     </div>
 
     <!-- ===================== TEAM VIEW ===================== -->
@@ -918,34 +949,33 @@
      Spreads each job item's remaining hours evenly across the
      working days between today and its job's due date.
   ========================================================= */
-  const capacityGridEl = document.getElementById("capacity-grid");
   const dailyCapInput = document.getElementById("daily-capacity");
-  const capacityEmployeeFilterEl = document.getElementById("capacity-employee-filter");
+  const capacityMonthToggleEl = document.getElementById("capacity-month-toggle");
+  const capacityTableEl = document.getElementById("capacity-table");
 
   function isWeekday(date){ const d = date.getDay(); return d !== 0 && d !== 6; }
 
   function renderCapacity(){
     dailyCapInput.value = state.settings.dailyCapacityHours;
-
-    const currentFilter = capacityEmployeeFilterEl.value || "";
-    capacityEmployeeFilterEl.innerHTML = `
-      <option value="">All employees</option>
-      <option value="__unassigned__">Unassigned</option>
-      ${getEmployees().map(emp => `<option value="${emp.id}">${escapeHtml(emp.name)}</option>`).join("")}
-    `;
-    capacityEmployeeFilterEl.value = currentFilter;
-    const employeeFilter = capacityEmployeeFilterEl.value;
+    const monthMode = capacityMonthToggleEl.checked;
+    const cap = state.settings.dailyCapacityHours;
 
     const today = new Date(); today.setHours(0,0,0,0);
     const days = [];
-    for(let i=0; i<10; i++){
+    const targetCount = monthMode ? 22 : 7;
+    const scanLimit = monthMode ? 45 : 12;
+    for(let i=0; i<scanLimit && days.length<targetCount; i++){
       const d = new Date(today); d.setDate(d.getDate()+i);
-      if(isWeekday(d)) days.push({ date:d, jobs:[] });
-      if(days.length >= 7) break;
+      if(isWeekday(d)) days.push({ date:d });
     }
 
-    const jobs = getJobs().filter(j => j.status !== "done");
+    const employees = getEmployees();
+    const rows = [...employees.map(e => ({ id:e.id, name:e.name })), { id:"__unassigned__", name:"Unassigned" }];
 
+    const hours = {};
+    rows.forEach(r => hours[r.id] = days.map(()=>0));
+
+    const jobs = getJobs().filter(j => j.status !== "done");
     jobs.forEach(job => {
       let targetDays = days;
       if(job.due){
@@ -953,47 +983,57 @@
         const inWindow = days.filter(d => d.date <= due);
         if(inWindow.length) targetDays = inWindow;
       }
+      if(targetDays.length === 0) return;
       job.items.forEach(item => {
-        const assigned = item.assignedTo || [];
-        if(employeeFilter === "__unassigned__" && assigned.length > 0) return;
-        if(employeeFilter && employeeFilter !== "__unassigned__" && !assigned.includes(employeeFilter)) return;
         const remaining = Math.max(0, (Number(item.estimatedHours)||0) - (Number(item.actualHours)||0));
         if(remaining <= 0) return;
         const perDay = remaining / targetDays.length;
-        targetDays.forEach(d => d.jobs.push({ name: job.name, hours: perDay }));
+        const assignedIds = (item.assignedTo && item.assignedTo.length) ? item.assignedTo : ["__unassigned__"];
+        assignedIds.forEach(empId => {
+          if(!hours[empId]) return;
+          targetDays.forEach(d => { hours[empId][days.indexOf(d)] += perDay; });
+        });
       });
     });
 
-    const cap = state.settings.dailyCapacityHours;
+    function cellClass(v){
+      if(v <= 0) return "zero";
+      if(v > cap) return "bad";
+      if(v > cap*0.8) return "warn";
+      return "ok";
+    }
 
-    capacityGridEl.innerHTML = days.map(d => {
-      const total = d.jobs.reduce((s,j)=>s+j.hours,0);
-      const pct = Math.min(100, (total / cap) * 100);
-      let fillClass = "";
-      if(total > cap) fillClass = "bad"; else if(total > cap*0.8) fillClass = "warn";
+    const headerCells = days.map(d => {
       const isToday = d.date.getTime() === today.getTime();
-
-      return `
-      <div class="day-card ${isToday?'today':''}">
-        <div class="day-head">
-          <span class="day-name">${d.date.toLocaleDateString(undefined,{weekday:'short'})}</span>
-          <span class="day-date">${d.date.toLocaleDateString(undefined,{month:'short', day:'numeric'})}</span>
-        </div>
-        <div class="day-load-bar"><div class="day-load-fill ${fillClass}" style="width:${pct}%"></div></div>
-        <div class="day-total">${fmtHours(total)}h <span class="day-cap">/ ${cap}h</span></div>
-        <div class="day-jobs">
-          ${d.jobs.slice(0,4).map(j => `<div class="day-job-chip"><span>${escapeHtml(j.name)}</span><span>${fmtHours(j.hours)}h</span></div>`).join("")}
-          ${d.jobs.length>4 ? `<div class="day-job-chip"><span>+${d.jobs.length-4} more</span></div>` : ""}
-          ${d.jobs.length===0 ? `<div class="day-job-chip" style="color:var(--steel-600)">Clear</div>` : ""}
-        </div>
-      </div>`;
+      return `<th class="${isToday?'today-col':''}">
+        <div>${d.date.toLocaleDateString(undefined,{weekday:'short'})}</div>
+        <div>${d.date.toLocaleDateString(undefined,{month:'short', day:'numeric'})}</div>
+      </th>`;
     }).join("");
+
+    const bodyRows = rows.map(r => {
+      const cells = hours[r.id].map(v => `<td class="capacity-cell ${cellClass(v)}">${v>0?fmtHours(v)+'h':'—'}</td>`).join("");
+      return `<tr><td class="emp-col">${escapeHtml(r.name)}</td>${cells}</tr>`;
+    }).join("");
+
+    const totalCells = days.map((d,idx) => {
+      const total = rows.reduce((s,r)=> s + hours[r.id][idx], 0);
+      return `<td class="capacity-cell">${total>0?fmtHours(total)+'h':'—'}</td>`;
+    }).join("");
+
+    capacityTableEl.innerHTML = `
+      <thead><tr><th class="emp-col">Team</th>${headerCells}</tr></thead>
+      <tbody>
+        ${bodyRows}
+        <tr class="capacity-total-row"><td class="emp-col">Total</td>${totalCells}</tr>
+      </tbody>`;
   }
 
   dailyCapInput.addEventListener("change", () => {
     setDailyCapacity(dailyCapInput.value);
     renderCapacity();
   });
+  capacityMonthToggleEl.addEventListener("change", renderCapacity);
 
   /* =========================================================
      NAV + MODAL
@@ -1008,8 +1048,6 @@
       if(btn.getAttribute("data-view") === "team") renderTeam();
     });
   });
-
-  capacityEmployeeFilterEl.addEventListener("change", renderCapacity);
 
   const modal = document.getElementById("modal-new-job");
   document.getElementById("btn-new-job").addEventListener("click", () => {
