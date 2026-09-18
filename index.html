@@ -213,10 +213,46 @@
     resize:vertical; box-sizing:border-box; min-height:36px;
   }
   .job-notes-input:focus{border-color:var(--amber);}
-  .material-cell{display:flex; gap:4px; align-items:center;}
-  .material-cell input[type="text"]{width:100px; font-size:12px; text-align:left;}
-  .material-cell input[type="number"]{width:36px;}
-  .log-time-input{width:44px; margin-left:4px;}
+
+  /* ---------- item cards ---------- */
+  .item-card{
+    background:var(--steel-800); border:1px solid var(--steel-700); border-radius:6px;
+    padding:12px; margin-bottom:10px;
+  }
+  .item-card-row{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px;}
+  .item-card-row:last-of-type{margin-bottom:8px;}
+  .field-label{font-size:10px; text-transform:uppercase; color:var(--steel-600); letter-spacing:.03em; white-space:nowrap;}
+  .item-desc-input{
+    all:unset; flex:2 1 160px; min-width:120px; background:var(--steel-900); border:1px solid var(--steel-700);
+    border-radius:4px; padding:6px 8px; color:var(--steel-100); font-size:13px; box-sizing:border-box;
+  }
+  .item-desc-input:focus{border-color:var(--amber);}
+  .process-input{
+    all:unset; flex:1 1 100px; min-width:90px; background:var(--steel-900); border:1px solid var(--steel-700);
+    border-radius:4px; padding:6px 8px; color:var(--steel-200); font-family:var(--mono); font-size:12px; box-sizing:border-box;
+  }
+  .process-input:focus{border-color:var(--amber);}
+  .parts-input{
+    all:unset; width:56px; background:var(--steel-900); border:1px solid var(--steel-700);
+    border-radius:4px; padding:6px 8px; color:var(--steel-100); font-family:var(--mono); text-align:right; font-size:13px; box-sizing:border-box;
+  }
+  .parts-input:focus{border-color:var(--amber);}
+  .item-hours-row{font-family:var(--mono); font-size:12.5px; color:var(--steel-200);}
+  .item-hours-row .hours-input{width:52px;}
+  .log-time-input, .log-time-input-cut{width:44px; margin-left:4px;}
+  .cutlist-toggle-row{font-size:12.5px; color:var(--steel-400); cursor:pointer; user-select:none;}
+  .cutlist-toggle-row input{accent-color:var(--amber);}
+  .cutlist-sub{
+    background:var(--steel-900); border:1px dashed var(--steel-700); border-radius:5px;
+    padding:10px; margin:2px 0 8px 0; flex-direction:column; gap:8px;
+  }
+  .cutlist-sub-title{font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--amber); font-weight:600;}
+  .item-notes-input{
+    all:unset; display:block; width:100%; background:var(--steel-900); border:1px solid var(--steel-700);
+    border-radius:4px; padding:7px 9px; color:var(--steel-100); font-size:12.5px; font-family:var(--sans);
+    resize:vertical; box-sizing:border-box; min-height:32px;
+  }
+  .item-notes-input:focus{border-color:var(--amber);}
 
   .capacity-setting{display:flex; align-items:center; gap:8px; margin-bottom:20px; font-size:12.5px; color:var(--steel-400);}
   .capacity-setting input{
@@ -437,15 +473,27 @@
 
   let state = loadState();
   if(!Array.isArray(state.employees)) state.employees = [];
-  if(!state.cutListAssignments) state.cutListAssignments = {};
   state.jobs.forEach(job => {
     if(typeof job.notes !== "string") job.notes = "";
     job.items.forEach(item => {
       if(!Array.isArray(item.assignedTo)) item.assignedTo = item.assignedTo ? [item.assignedTo] : [];
       if(!Array.isArray(item.attachments)) item.attachments = [];
-      if(item.quantity === undefined) item.quantity = 1;
-      if(typeof item.material !== "string") item.material = "";
-      if(item.cutLength === undefined) item.cutLength = 0;
+      if(typeof item.notes !== "string") item.notes = "";
+      if(item.process === undefined) item.process = item.machine || "";
+      if(item.partsNeeded === undefined) item.partsNeeded = item.quantity !== undefined ? Number(item.quantity) : 1;
+      if(!item.cutList){
+        const hadOldCut = !!(item.material || item.cutLength);
+        item.cutList = {
+          enabled: hadOldCut,
+          quantity: hadOldCut ? (item.quantity !== undefined ? Number(item.quantity) : 1) : 0,
+          material: item.material || "",
+          dimension: "",
+          length: item.cutLength !== undefined ? Number(item.cutLength) : 0,
+          estimatedHours: 0,
+          actualHours: 0,
+          assignedTo: []
+        };
+      }
     });
   });
 
@@ -486,20 +534,27 @@
     if(job){ job.status = status; persistState(); }
   }
 
+  function ensureCutList(item){
+    if(!item.cutList){
+      item.cutList = { enabled:false, quantity:0, material:"", dimension:"", length:0, estimatedHours:0, actualHours:0, assignedTo:[] };
+    }
+    return item.cutList;
+  }
+
   function addItem(jobId, item){
     const job = state.jobs.find(j => j.id === jobId);
     if(!job) return;
     job.items.push({
       id: uid("item"),
       description: item.description || "New item",
-      machine: item.machine || "laser",
+      process: item.process || "",
       estimatedHours: Number(item.estimatedHours) || 0,
       actualHours: 0,
       assignedTo: Array.isArray(item.assignedTo) ? item.assignedTo : [],
       attachments: [],
-      quantity: item.quantity !== undefined ? Number(item.quantity) : 1,
-      material: item.material || "",
-      cutLength: item.cutLength !== undefined ? Number(item.cutLength) : 0
+      notes: item.notes || "",
+      partsNeeded: item.partsNeeded !== undefined ? Number(item.partsNeeded) : 1,
+      cutList: { enabled:false, quantity:0, material:"", dimension:"", length:0, estimatedHours:0, actualHours:0, assignedTo:[] }
     });
     persistState();
   }
@@ -513,12 +568,46 @@
     persistState();
   }
 
-  function logTime(jobId, itemId, hours){
+  function updateItemNotes(jobId, itemId, notes){
     const job = state.jobs.find(j => j.id === jobId);
     if(!job) return;
     const item = job.items.find(i => i.id === itemId);
     if(!item) return;
-    item.actualHours = Math.max(0, (Number(item.actualHours) || 0) + Number(hours));
+    item.notes = notes;
+    persistState();
+  }
+
+  function setCutListEnabled(jobId, itemId, enabled){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return;
+    const cl = ensureCutList(item);
+    cl.enabled = enabled;
+    if(enabled && !cl.quantity) cl.quantity = item.partsNeeded || 0;
+    persistState();
+  }
+
+  function updateCutListField(jobId, itemId, field, value){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return;
+    ensureCutList(item)[field] = value;
+    persistState();
+  }
+
+  function logTime(jobId, itemId, hours, scope){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return;
+    if(scope === "cut"){
+      const cl = ensureCutList(item);
+      cl.actualHours = Math.max(0, (Number(cl.actualHours) || 0) + Number(hours));
+    } else {
+      item.actualHours = Math.max(0, (Number(item.actualHours) || 0) + Number(hours));
+    }
     persistState();
   }
 
@@ -548,24 +637,21 @@
     // unassign anyone pointing at this employee, rather than leaving a dangling id
     state.jobs.forEach(job => job.items.forEach(item => {
       item.assignedTo = (item.assignedTo || []).filter(id => id !== employeeId);
+      if(item.cutList) item.cutList.assignedTo = (item.cutList.assignedTo || []).filter(id => id !== employeeId);
     }));
-    Object.keys(state.cutListAssignments).forEach(key => {
-      if(state.cutListAssignments[key] === employeeId) delete state.cutListAssignments[key];
-    });
     persistState();
   }
 
-  function setCutListAssignment(materialKey, employeeId){
-    state.cutListAssignments[materialKey] = employeeId;
-    persistState();
-  }
-
-  function setItemAssignments(jobId, itemId, employeeIds){
+  function setItemAssignments(jobId, itemId, employeeIds, scope){
     const job = state.jobs.find(j => j.id === jobId);
     if(!job) return;
     const item = job.items.find(i => i.id === itemId);
     if(!item) return;
-    item.assignedTo = employeeIds;
+    if(scope === "cut"){
+      ensureCutList(item).assignedTo = employeeIds;
+    } else {
+      item.assignedTo = employeeIds;
+    }
     persistState();
   }
 
@@ -590,9 +676,13 @@
     persistState();
   }
 
-  /* helper roll-ups */
-  function jobEstimated(job){ return job.items.reduce((s,i)=>s+(Number(i.estimatedHours)||0),0); }
-  function jobActual(job){ return job.items.reduce((s,i)=>s+(Number(i.actualHours)||0),0); }
+  /* helper roll-ups — include cut-prep hours alongside the main operation */
+  function jobEstimated(job){
+    return job.items.reduce((s,i)=> s + (Number(i.estimatedHours)||0) + ((i.cutList && i.cutList.enabled) ? (Number(i.cutList.estimatedHours)||0) : 0), 0);
+  }
+  function jobActual(job){
+    return job.items.reduce((s,i)=> s + (Number(i.actualHours)||0) + ((i.cutList && i.cutList.enabled) ? (Number(i.cutList.actualHours)||0) : 0), 0);
+  }
   function jobRemaining(job){ return Math.max(0, jobEstimated(job) - jobActual(job)); }
 
   /* =========================================================
@@ -602,10 +692,6 @@
   const statRowEl = document.getElementById("stat-row");
   const openJobIds = new Set();
 
-  const MACHINES = [
-    ["laser","Laser"], ["lathe","Lathe"], ["mill","Mill"],
-    ["brake","Press brake"], ["fab","Fab / weld"], ["other","Other"]
-  ];
   const STATUSES = ["quoted","scheduled","in_progress","done"];
   const STATUS_LABEL = { quoted:"Quoted", scheduled:"Scheduled", in_progress:"In progress", done:"Done" };
 
@@ -630,6 +716,16 @@
     if(names.length === 0) return "Unassigned";
     if(names.length === 1) return names[0];
     return names.length + " assigned";
+  }
+
+  function cutAssignedLabel(item){
+    const arr = (item.cutList && item.cutList.assignedTo) || [];
+    const names = arr
+      .map(id => { const e = getEmployees().find(x => x.id === id); return e ? e.name : null; })
+      .filter(Boolean);
+    if(names.length === 0) return "Cut: unassigned";
+    if(names.length === 1) return "Cut: " + names[0];
+    return "Cut: " + names.length + " assigned";
   }
 
   function daysUntil(dateStr){
@@ -688,34 +784,62 @@
         ? (d < 0 ? `${Math.abs(d)}d overdue` : d === 0 ? "due today" : `due in ${d}d`)
         : "no due date";
 
-      const itemsRows = job.items.map(item => `
-        <tr data-item="${item.id}">
-          <td><input class="item-desc-input" value="${escapeAttr(item.description)}" data-field="description"></td>
-          <td>
-            <select class="machine-select" data-field="machine">
-              ${MACHINES.map(([v,l]) => `<option value="${v}" ${item.machine===v?'selected':''}>${l}</option>`).join("")}
-            </select>
-          </td>
-          <td>
-            <div class="material-cell">
-              <input type="number" class="hours-input" min="0" step="1" value="${item.quantity}" data-field="quantity" title="Quantity">
-              <input type="text" class="hours-input" value="${escapeAttr(item.material)}" placeholder="Material" data-field="material" title="Material / stock">
-              <input type="number" class="hours-input" min="0" step="1" value="${item.cutLength || ''}" placeholder="mm" data-field="cutLength" title="Cut length per piece, mm">
-            </div>
-          </td>
-          <td><button class="btn btn-ghost btn-sm assign-btn">${escapeHtml(assignedLabel(item))}</button></td>
-          <td><button class="btn btn-ghost btn-sm files-btn">📎${item.attachments && item.attachments.length ? ' '+item.attachments.length : ''}</button></td>
-          <td class="num"><input class="hours-input" type="number" step="0.25" min="0" value="${item.estimatedHours}" data-field="estimatedHours"></td>
-          <td class="num" style="font-family:var(--mono); color:${item.actualHours > item.estimatedHours && item.estimatedHours>0 ? 'var(--red)':'var(--steel-200)'}">${fmtHours(item.actualHours)}</td>
-          <td class="num">
-            <button class="btn btn-ghost btn-sm log-time-btn" data-log="0.25">+15m</button>
-            <button class="btn btn-ghost btn-sm log-time-btn" data-log="1">+1h</button>
+      const itemsCards = job.items.map(item => {
+        const cl = item.cutList || {};
+        return `
+        <div class="item-card" data-item="${item.id}">
+          <div class="item-card-row">
+            <input class="item-desc-input" value="${escapeAttr(item.description)}" data-field="description" placeholder="Item name">
+            <input class="process-input" value="${escapeAttr(item.process||'')}" data-field="process" placeholder="Process">
+            <span class="field-label">Parts</span>
+            <input type="number" class="parts-input" min="0" step="1" value="${item.partsNeeded}" data-field="partsNeeded" title="Parts needed">
+            <button class="btn btn-ghost btn-sm assign-btn">${escapeHtml(assignedLabel(item))}</button>
+            <button class="btn btn-ghost btn-sm files-btn">📎${item.attachments && item.attachments.length ? ' '+item.attachments.length : ''}</button>
+            <button class="btn btn-danger del-item-btn" style="margin-left:auto;">✕</button>
+          </div>
+
+          <div class="item-card-row item-hours-row">
+            <span class="field-label">Est</span>
+            <input class="hours-input" type="number" step="0.25" min="0" value="${item.estimatedHours}" data-field="estimatedHours">
+            <span class="field-label">Actual</span>
+            <span style="color:${item.actualHours > item.estimatedHours && item.estimatedHours>0 ? 'var(--red)':'var(--steel-200)'}">${fmtHours(item.actualHours)}h</span>
+            <button class="btn btn-ghost btn-sm log-time-btn" data-log="0.25" data-scope="item">+15m</button>
+            <button class="btn btn-ghost btn-sm log-time-btn" data-log="1" data-scope="item">+1h</button>
             <input type="number" step="0.25" min="0" class="hours-input log-time-input" placeholder="hrs">
-            <button class="btn btn-ghost btn-sm log-time-typed-btn">Log</button>
-          </td>
-          <td class="num"><button class="btn btn-danger del-item-btn">✕</button></td>
-        </tr>
-      `).join("");
+            <button class="btn btn-ghost btn-sm log-time-typed-btn" data-scope="item">Log</button>
+          </div>
+
+          <label class="item-card-row cutlist-toggle-row">
+            <input type="checkbox" class="cutlist-toggle" ${cl.enabled?'checked':''}>
+            Needs a cut list
+          </label>
+
+          <div class="cutlist-sub" style="display:${cl.enabled?'flex':'none'}">
+            <div class="cutlist-sub-title">Cut prep</div>
+            <div class="item-card-row">
+              <span class="field-label">Cut qty</span>
+              <input type="number" class="parts-input cut-field" min="0" step="1" value="${cl.quantity||0}" data-cutfield="quantity" title="Cut quantity, including any setup allowance">
+              <input type="text" class="process-input cut-field" style="flex:1 1 110px;" value="${escapeAttr(cl.material||'')}" placeholder="Material" data-cutfield="material">
+              <input type="text" class="process-input cut-field" style="flex:1 1 100px;" value="${escapeAttr(cl.dimension||'')}" placeholder="Dimension" data-cutfield="dimension">
+              <input type="number" class="parts-input cut-field" min="0" step="1" value="${cl.length||''}" placeholder="mm" data-cutfield="length" title="Cut length per piece, mm">
+            </div>
+            <div class="item-card-row item-hours-row">
+              <span class="field-label">Est</span>
+              <input class="hours-input cut-field" type="number" step="0.25" min="0" value="${cl.estimatedHours||0}" data-cutfield="estimatedHours">
+              <span class="field-label">Actual</span>
+              <span>${fmtHours(cl.actualHours||0)}h</span>
+              <button class="btn btn-ghost btn-sm log-time-btn" data-log="0.25" data-scope="cut">+15m</button>
+              <button class="btn btn-ghost btn-sm log-time-btn" data-log="1" data-scope="cut">+1h</button>
+              <input type="number" step="0.25" min="0" class="hours-input log-time-input-cut" placeholder="hrs">
+              <button class="btn btn-ghost btn-sm log-time-typed-btn" data-scope="cut">Log</button>
+              <button class="btn btn-ghost btn-sm cut-assign-btn">${escapeHtml(cutAssignedLabel(item))}</button>
+            </div>
+          </div>
+
+          <textarea class="item-notes-input" placeholder="Notes for this item...">${escapeHtml(item.notes||'')}</textarea>
+        </div>
+        `;
+      }).join("");
 
       return `
       <div class="card" data-job="${job.id}">
@@ -737,20 +861,9 @@
           </div>
         </div>
         <div class="job-body ${openJobIds.has(job.id)?'open':''}">
-          <div style="overflow-x:auto;">
-          <table>
-            <thead>
-              <tr><th>Item</th><th>Machine</th><th>Qty / Material / Length</th><th>Assigned</th><th>Files</th><th style="text-align:right">Est. hrs</th><th style="text-align:right">Actual</th><th></th><th></th></tr>
-            </thead>
-            <tbody>
-              ${itemsRows}
-              <tr class="add-item-row">
-                <td colspan="9"><button class="btn btn-ghost btn-sm add-item-btn">+ Add item</button></td>
-              </tr>
-            </tbody>
-          </table>
-          </div>
-          <label class="job-notes-label">Notes</label>
+          ${itemsCards}
+          <button class="btn btn-ghost btn-sm add-item-btn">+ Add item</button>
+          <label class="job-notes-label">Job notes</label>
           <textarea class="job-notes-input" data-job="${job.id}" rows="2" placeholder="Add notes about this job...">${escapeHtml(job.notes||"")}</textarea>
         </div>
       </div>`;
@@ -803,42 +916,60 @@
     jobsListEl.querySelectorAll(".add-item-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         const jobId = btn.closest(".card").getAttribute("data-job");
-        addItem(jobId, { description:"New item", machine:"laser", estimatedHours:1, assignedTo:[], quantity:1, material:"", cutLength:0 });
+        addItem(jobId, { description:"New item", process:"", estimatedHours:1, assignedTo:[], partsNeeded:1 });
         openJobIds.add(jobId);
         renderJobs(); renderCapacity();
       });
     });
 
-    jobsListEl.querySelectorAll("tr[data-item]").forEach(row => {
-      const card = row.closest(".card");
-      const jobId = card.getAttribute("data-job");
-      const itemId = row.getAttribute("data-item");
+    jobsListEl.querySelectorAll(".item-card").forEach(cardEl => {
+      const jobId = cardEl.closest(".card").getAttribute("data-job");
+      const itemId = cardEl.getAttribute("data-item");
 
-      const NUMERIC_FIELDS = ["estimatedHours","quantity","cutLength"];
-      row.querySelectorAll("[data-field]").forEach(input => {
+      const NUMERIC_FIELDS = ["estimatedHours","partsNeeded"];
+      cardEl.querySelectorAll("[data-field]").forEach(input => {
         const field = input.getAttribute("data-field");
-        const evt = input.tagName === "SELECT" ? "change" : "change";
-        input.addEventListener(evt, () => {
+        input.addEventListener("change", () => {
           const val = NUMERIC_FIELDS.includes(field) ? Number(input.value) : input.value;
           updateItem(jobId, itemId, { [field]: val });
           renderJobs(); renderCapacity();
         });
       });
 
-      row.querySelectorAll(".log-time-btn").forEach(btn => {
+      const NUMERIC_CUT_FIELDS = ["quantity","length","estimatedHours"];
+      cardEl.querySelectorAll("[data-cutfield]").forEach(input => {
+        const field = input.getAttribute("data-cutfield");
+        input.addEventListener("change", () => {
+          const val = NUMERIC_CUT_FIELDS.includes(field) ? Number(input.value) : input.value;
+          updateCutListField(jobId, itemId, field, val);
+          renderJobs(); renderCapacity(); renderCutList();
+        });
+      });
+
+      cardEl.querySelector(".cutlist-toggle").addEventListener("change", (e) => {
+        setCutListEnabled(jobId, itemId, e.target.checked);
+        openJobIds.add(jobId);
+        renderJobs(); renderCapacity(); renderCutList();
+      });
+
+      cardEl.querySelector(".item-notes-input").addEventListener("change", (e) => {
+        updateItemNotes(jobId, itemId, e.target.value);
+      });
+
+      cardEl.querySelectorAll(".log-time-btn").forEach(btn => {
         btn.addEventListener("click", () => {
-          logTime(jobId, itemId, Number(btn.getAttribute("data-log")));
+          logTime(jobId, itemId, Number(btn.getAttribute("data-log")), btn.getAttribute("data-scope"));
           openJobIds.add(jobId);
           renderJobs(); renderCapacity();
         });
       });
 
-      const typedInput = row.querySelector(".log-time-input");
-      const typedBtn = row.querySelector(".log-time-typed-btn");
+      const typedInput = cardEl.querySelector(".log-time-input");
+      const typedBtn = cardEl.querySelector(".log-time-typed-btn");
       const submitTyped = () => {
         const v = Number(typedInput.value);
         if(v > 0){
-          logTime(jobId, itemId, v);
+          logTime(jobId, itemId, v, "item");
           openJobIds.add(jobId);
           renderJobs(); renderCapacity();
         }
@@ -846,19 +977,43 @@
       typedBtn.addEventListener("click", submitTyped);
       typedInput.addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); submitTyped(); } });
 
-      row.querySelector(".del-item-btn").addEventListener("click", () => {
+      const typedCutInput = cardEl.querySelector(".log-time-input-cut");
+      const typedCutBtn = cardEl.querySelector(".cutlist-sub .log-time-typed-btn");
+      if(typedCutInput && typedCutBtn){
+        const submitTypedCut = () => {
+          const v = Number(typedCutInput.value);
+          if(v > 0){
+            logTime(jobId, itemId, v, "cut");
+            openJobIds.add(jobId);
+            renderJobs(); renderCapacity();
+          }
+        };
+        typedCutBtn.addEventListener("click", submitTypedCut);
+        typedCutInput.addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); submitTypedCut(); } });
+      }
+
+      cardEl.querySelector(".del-item-btn").addEventListener("click", () => {
         deleteItem(jobId, itemId);
         openJobIds.add(jobId);
-        renderJobs(); renderCapacity();
+        renderJobs(); renderCapacity(); renderCutList();
       });
 
-      row.querySelector(".assign-btn").addEventListener("click", (e) => {
+      cardEl.querySelector(".assign-btn").addEventListener("click", (e) => {
         e.stopPropagation();
-        openPopoverAt(e.currentTarget, buildAssignPopoverHtml(jobId, itemId));
-        wireAssignPopover(jobId, itemId, e.currentTarget);
+        openPopoverAt(e.currentTarget, buildAssignPopoverHtml(jobId, itemId, "item"));
+        wireAssignPopover(jobId, itemId, "item", e.currentTarget);
       });
 
-      row.querySelector(".files-btn").addEventListener("click", (e) => {
+      const cutAssignBtn = cardEl.querySelector(".cut-assign-btn");
+      if(cutAssignBtn){
+        cutAssignBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openPopoverAt(e.currentTarget, buildAssignPopoverHtml(jobId, itemId, "cut"));
+          wireAssignPopover(jobId, itemId, "cut", e.currentTarget);
+        });
+      }
+
+      cardEl.querySelector(".files-btn").addEventListener("click", (e) => {
         e.stopPropagation();
         openPopoverAt(e.currentTarget, buildFilesPopoverHtml(jobId, itemId));
         wireFilesPopover(jobId, itemId, e.currentTarget);
@@ -900,31 +1055,33 @@
     setTimeout(() => document.addEventListener("click", popoverCloseHandler, true), 0);
   }
 
-  function buildAssignPopoverHtml(jobId, itemId){
+  function buildAssignPopoverHtml(jobId, itemId, scope){
     const job = getJobs().find(j => j.id === jobId);
     const item = job.items.find(i => i.id === itemId);
+    const arr = scope === "cut" ? ((item.cutList && item.cutList.assignedTo) || []) : item.assignedTo;
     const emps = getEmployees();
     if(emps.length === 0){
-      return `<div class="popover-title">Assign staff</div><div class="popover-note">No employees yet — add your team on the Team tab.</div>`;
+      return `<div class="popover-title">${scope==="cut"?"Assign cutting":"Assign staff"}</div><div class="popover-note">No employees yet — add your team on the Team tab.</div>`;
     }
-    return `<div class="popover-title">Assign staff</div>` + emps.map(emp => `
+    return `<div class="popover-title">${scope==="cut"?"Assign cutting":"Assign staff"}</div>` + emps.map(emp => `
       <label class="popover-check-row">
-        <input type="checkbox" data-emp="${emp.id}" ${item.assignedTo.includes(emp.id) ? 'checked' : ''}>
+        <input type="checkbox" data-emp="${emp.id}" ${arr.includes(emp.id) ? 'checked' : ''}>
         ${escapeHtml(emp.name)}
       </label>
     `).join("");
   }
 
-  function wireAssignPopover(jobId, itemId, btn){
+  function wireAssignPopover(jobId, itemId, scope, btn){
     popoverEl.querySelectorAll("input[type=checkbox][data-emp]").forEach(cb => {
       cb.addEventListener("change", () => {
         const job = getJobs().find(j => j.id === jobId);
         const item = job.items.find(i => i.id === itemId);
+        const current = scope === "cut" ? ((item.cutList && item.cutList.assignedTo) || []) : item.assignedTo;
         const empId = cb.getAttribute("data-emp");
-        const set = new Set(item.assignedTo);
+        const set = new Set(current);
         if(cb.checked) set.add(empId); else set.delete(empId);
-        setItemAssignments(jobId, itemId, Array.from(set));
-        btn.textContent = assignedLabel(item);
+        setItemAssignments(jobId, itemId, Array.from(set), scope);
+        btn.textContent = scope === "cut" ? cutAssignedLabel(item) : assignedLabel(item);
         renderCapacity(); renderTeam();
       });
     });
@@ -1015,9 +1172,16 @@
         ${employees.map(emp => {
           const remaining = getJobs().reduce((sum, job) => {
             if(job.status === "done") return sum;
-            return sum + job.items
-              .filter(i => (i.assignedTo || []).includes(emp.id))
-              .reduce((s,i)=> s + Math.max(0, (Number(i.estimatedHours)||0) - (Number(i.actualHours)||0)), 0);
+            return sum + job.items.reduce((s,i) => {
+              let r = 0;
+              if((i.assignedTo || []).includes(emp.id)){
+                r += Math.max(0, (Number(i.estimatedHours)||0) - (Number(i.actualHours)||0));
+              }
+              if(i.cutList && i.cutList.enabled && (i.cutList.assignedTo||[]).includes(emp.id)){
+                r += Math.max(0, (Number(i.cutList.estimatedHours)||0) - (Number(i.cutList.actualHours)||0));
+              }
+              return s + r;
+            }, 0);
           }, 0);
           return `
           <tr data-employee="${emp.id}">
@@ -1051,15 +1215,20 @@
     const map = {};
     getJobs().filter(j => j.status !== "done").forEach(job => {
       job.items.forEach(item => {
-        const mat = (item.material || "").trim();
-        const len = Number(item.cutLength) || 0;
+        const cl = item.cutList;
+        if(!cl || !cl.enabled) return;
+        const mat = (cl.material || "").trim();
+        const len = Number(cl.length) || 0;
         if(!mat || len <= 0) return;
-        const qty = Number(item.quantity) || 0;
+        const qty = Number(cl.quantity) || 0;
         const key = mat.toLowerCase();
         if(!map[key]) map[key] = { key, label: mat, qty: 0, totalLength: 0, lines: [] };
         map[key].qty += qty;
         map[key].totalLength += qty * len;
-        map[key].lines.push({ jobName: job.name, desc: item.description, qty, len });
+        map[key].lines.push({
+          jobName: job.name, desc: item.description, dimension: cl.dimension || "",
+          qty, len, assigned: cutAssignedLabel(item)
+        });
       });
     });
     return Object.values(map).sort((a,b) => a.label.localeCompare(b.label));
@@ -1072,7 +1241,7 @@
         <div class="card">
           <div class="empty">
             <div class="empty-title">Nothing to cut yet</div>
-            <div>Set a material and cut length on job items to see what needs preparing.</div>
+            <div>Tick "Needs a cut list" on a job item and fill in its material and length to see what needs preparing.</div>
           </div>
         </div>`;
       return;
@@ -1087,31 +1256,19 @@
               <div class="job-customer">${g.qty} off · ${fmtLength(g.totalLength)} total</div>
             </div>
           </div>
-          <div class="job-metrics">
-            <select class="machine-select cutlist-assign" data-material="${escapeAttr(g.key)}">
-              <option value="" ${!state.cutListAssignments[g.key]?'selected':''}>Unassigned</option>
-              ${getEmployees().map(emp => `<option value="${emp.id}" ${state.cutListAssignments[g.key]===emp.id?'selected':''}>${escapeHtml(emp.name)}</option>`).join("")}
-            </select>
-          </div>
         </div>
         <div class="job-body open">
           <div style="overflow-x:auto;">
           <table>
-            <thead><tr><th>Job</th><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Length ea.</th></tr></thead>
+            <thead><tr><th>Job</th><th>Item</th><th>Dimension</th><th style="text-align:right">Qty</th><th style="text-align:right">Length ea.</th><th>Assigned</th></tr></thead>
             <tbody>
-              ${g.lines.map(l => `<tr><td>${escapeHtml(l.jobName)}</td><td>${escapeHtml(l.desc)}</td><td class="num">${l.qty}</td><td class="num">${fmtLength(l.len)}</td></tr>`).join("")}
+              ${g.lines.map(l => `<tr><td>${escapeHtml(l.jobName)}</td><td>${escapeHtml(l.desc)}</td><td>${escapeHtml(l.dimension)}</td><td class="num">${l.qty}</td><td class="num">${fmtLength(l.len)}</td><td>${escapeHtml(l.assigned)}</td></tr>`).join("")}
             </tbody>
           </table>
           </div>
         </div>
       </div>
     `).join("");
-
-    cutListEl.querySelectorAll(".cutlist-assign").forEach(sel => {
-      sel.addEventListener("change", () => {
-        setCutListAssignment(sel.getAttribute("data-material"), sel.value);
-      });
-    });
   }
 
   /* =========================================================
@@ -1155,13 +1312,23 @@
       }
       if(targetDays.length === 0) return;
       job.items.forEach(item => {
-        const remaining = Math.max(0, (Number(item.estimatedHours)||0) - (Number(item.actualHours)||0));
-        if(remaining <= 0) return;
-        const perDay = remaining / targetDays.length;
-        const assignedIds = (item.assignedTo && item.assignedTo.length) ? item.assignedTo : ["__unassigned__"];
-        assignedIds.forEach(empId => {
-          if(!hours[empId]) return;
-          targetDays.forEach(d => { hours[empId][days.indexOf(d)] += perDay; });
+        const tasks = [];
+        const mainRemaining = Math.max(0, (Number(item.estimatedHours)||0) - (Number(item.actualHours)||0));
+        if(mainRemaining > 0){
+          tasks.push({ remaining: mainRemaining, assigned: (item.assignedTo && item.assignedTo.length) ? item.assignedTo : ["__unassigned__"] });
+        }
+        if(item.cutList && item.cutList.enabled){
+          const cutRemaining = Math.max(0, (Number(item.cutList.estimatedHours)||0) - (Number(item.cutList.actualHours)||0));
+          if(cutRemaining > 0){
+            tasks.push({ remaining: cutRemaining, assigned: (item.cutList.assignedTo && item.cutList.assignedTo.length) ? item.cutList.assignedTo : ["__unassigned__"] });
+          }
+        }
+        tasks.forEach(t => {
+          const perDay = t.remaining / targetDays.length;
+          t.assigned.forEach(empId => {
+            if(!hours[empId]) return;
+            targetDays.forEach(d => { hours[empId][days.indexOf(d)] += perDay; });
+          });
         });
       });
     });
