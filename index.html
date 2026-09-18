@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Helical Job Tracker</title>
+<style>
+  :root{
+    --steel-950:#14181c;
+    --steel-900:#1b2126;
+    --steel-800:#242c32;
+    --steel-700:#333d45;
+    --steel-600:#4a5760;
+    --steel-400:#7c8994;
+    --steel-200:#c3cbd1;
+    --steel-100:#e4e8eb;
+    --paper:#f2f0ea;
+    --amber:#e8830c;
+    --amber-dim:#a35e0a;
+    --red:#c94a3f;
+    --green:#4c8f5c;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+    --sans: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--steel-950);
+    color:var(--steel-100);
+    font-family:var(--sans);
+    font-size:14px;
+    line-height:1.45;
+  }
+
+  /* ---------- layout ---------- */
+  .app{display:flex; min-height:100vh;}
+  .sidebar{
+    width:200px; flex-shrink:0;
+    background:var(--steel-900);
+    border-right:1px solid var(--steel-700);
+    display:flex; flex-direction:column;
+    padding:20px 0;
+  }
+  .brand{
+    padding:0 20px 20px 20px;
+    border-bottom:1px solid var(--steel-700);
+    margin-bottom:16px;
+  }
+  .brand-mark{
+    font-family:var(--mono); font-weight:600; font-size:12px;
+    color:var(--amber); letter-spacing:.04em;
+  }
+  .brand-name{font-weight:600; font-size:16px; margin-top:2px;}
+
+  .nav{display:flex; flex-direction:column; gap:2px; padding:0 10px;}
+  .nav button{
+    all:unset; cursor:pointer;
+    padding:9px 12px; border-radius:4px;
+    font-size:13.5px; color:var(--steel-200);
+    display:flex; align-items:center; gap:9px;
+  }
+  .nav button:hover{background:var(--steel-800); color:var(--steel-100);}
+  .nav button.active{background:var(--steel-800); color:var(--amber); font-weight:600;}
+  .nav-dot{width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.6; flex-shrink:0;}
+
+  .sidebar-foot{
+    margin-top:auto; padding:14px 20px 4px 20px;
+    border-top:1px solid var(--steel-700);
+    font-size:11px; color:var(--steel-600); font-family:var(--mono);
+  }
+
+  .main{flex:1; min-width:0; padding:28px 34px 60px 34px;}
+  .view{display:none;}
+  .view.active{display:block;}
+
+  .page-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:22px; flex-wrap:wrap; gap:10px;}
+  .page-title{font-size:20px; font-weight:600; margin:0;}
+  .page-sub{color:var(--steel-400); font-size:13px; margin-top:2px;}
+
+  /* ---------- buttons ---------- */
+  .btn{
+    all:unset; cursor:pointer; font-family:var(--sans);
+    padding:8px 14px; border-radius:4px; font-size:13px; font-weight:600;
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .btn-primary{background:var(--amber); color:#1a1204;}
+  .btn-primary:hover{background:#f2930f;}
+  .btn-ghost{background:var(--steel-800); color:var(--steel-100); border:1px solid var(--steel-700);}
+  .btn-ghost:hover{border-color:var(--steel-600);}
+  .btn-danger{background:transparent; color:var(--red); padding:6px 8px;}
+  .btn-danger:hover{background:rgba(201,74,63,.12);}
+  .btn-sm{padding:5px 9px; font-size:12px;}
+
+  /* ---------- cards / tables ---------- */
+  .stat-row{display:flex; gap:14px; margin-bottom:24px; flex-wrap:wrap;}
+  .stat{
+    background:var(--steel-900); border:1px solid var(--steel-700); border-radius:6px;
+    padding:14px 18px; min-width:130px;
+  }
+  .stat-label{font-size:11px; color:var(--steel-400); text-transform:uppercase; letter-spacing:.05em;}
+  .stat-value{font-family:var(--mono); font-size:22px; font-weight:600; margin-top:4px;}
+  .stat-value.warn{color:var(--amber);}
+  .stat-value.bad{color:var(--red);}
+
+  .card{
+    background:var(--steel-900); border:1px solid var(--steel-700); border-radius:6px;
+    overflow:hidden; margin-bottom:16px;
+  }
+  .job-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 18px; cursor:pointer; gap:12px; flex-wrap:wrap;
+  }
+  .job-head:hover{background:var(--steel-800);}
+  .job-title-block{display:flex; align-items:center; gap:10px; min-width:0;}
+  .job-name{font-weight:600; font-size:14.5px;}
+  .job-customer{color:var(--steel-400); font-size:12.5px;}
+  .status-pill{
+    font-family:var(--mono); font-size:10.5px; font-weight:600; letter-spacing:.03em;
+    padding:3px 8px; border-radius:3px; text-transform:uppercase; white-space:nowrap;
+  }
+  .status-quoted{background:rgba(124,137,148,.18); color:var(--steel-200);}
+  .status-scheduled{background:rgba(232,131,12,.16); color:var(--amber);}
+  .status-in_progress{background:rgba(76,143,92,.16); color:var(--green);}
+  .status-done{background:rgba(124,137,148,.1); color:var(--steel-600);}
+
+  .job-metrics{display:flex; align-items:center; gap:18px; font-family:var(--mono); font-size:12.5px; color:var(--steel-200);}
+  .job-metrics .lbl{color:var(--steel-600); font-size:10px; text-transform:uppercase; margin-right:4px;}
+  .due-soon{color:var(--amber);}
+  .due-late{color:var(--red);}
+
+  .job-body{padding:0 18px 16px 18px; border-top:1px solid var(--steel-800); display:none;}
+  .job-body.open{display:block;}
+
+  table{width:100%; border-collapse:collapse; margin-top:10px;}
+  th{
+    text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--steel-600); padding:8px 6px; border-bottom:1px solid var(--steel-800); font-weight:600;
+  }
+  td{padding:8px 6px; border-bottom:1px solid var(--steel-800); font-size:13px; vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  .num{font-family:var(--mono); text-align:right;}
+  .item-desc-input{
+    all:unset; width:100%; color:var(--steel-100); font-size:13px; padding:2px 0;
+  }
+  .hours-input{
+    all:unset; width:56px; font-family:var(--mono); text-align:right;
+    background:var(--steel-800); border:1px solid var(--steel-700); border-radius:3px;
+    padding:3px 6px; color:var(--steel-100);
+  }
+  .hours-input:focus{border-color:var(--amber);}
+  .machine-select{
+    all:unset; font-family:var(--mono); font-size:11.5px; color:var(--steel-400);
+    background:var(--steel-800); border:1px solid var(--steel-700); border-radius:3px; padding:3px 6px;
+  }
+  .add-item-row td{padding-top:10px;}
+
+  .empty{
+    text-align:center; padding:50px 20px; color:var(--steel-600);
+  }
+  .empty-title{color:var(--steel-200); font-weight:600; margin-bottom:6px;}
+
+  /* ---------- capacity view ---------- */
+  .capacity-grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px;}
+  .day-card{
+    background:var(--steel-900); border:1px solid var(--steel-700); border-radius:6px; padding:14px;
+    min-height:120px;
+  }
+  .day-card.today{border-color:var(--amber);}
+  .day-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px;}
+  .day-name{font-weight:600; font-size:13px;}
+  .day-date{font-size:11px; color:var(--steel-600); font-family:var(--mono);}
+  .day-load-bar{height:5px; border-radius:3px; background:var(--steel-800); overflow:hidden; margin-bottom:8px;}
+  .day-load-fill{height:100%; background:var(--green);}
+  .day-load-fill.warn{background:var(--amber);}
+  .day-load-fill.bad{background:var(--red);}
+  .day-total{font-family:var(--mono); font-size:15px; font-weight:600;}
+  .day-cap{font-size:11px; color:var(--steel-600);}
+  .day-jobs{margin-top:8px; display:flex; flex-direction:column; gap:4px;}
+  .day-job-chip{font-size:11.5px; color:var(--steel-200); display:flex; justify-content:space-between; gap:6px;}
+  .day-job-chip span:last-child{font-family:var(--mono); color:var(--steel-400);}
+
+  /* ---------- modal ---------- */
+  .modal-backdrop{
+    display:none; position:fixed; inset:0; background:rgba(10,12,14,.6);
+    align-items:center; justify-content:center; z-index:50; padding:20px;
+  }
+  .modal-backdrop.open{display:flex;}
+  .modal{
+    background:var(--steel-900); border:1px solid var(--steel-700); border-radius:8px;
+    width:100%; max-width:420px; padding:22px;
+  }
+  .modal h3{margin:0 0 16px 0; font-size:16px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:11.5px; color:var(--steel-400); margin-bottom:5px; text-transform:uppercase; letter-spacing:.03em;}
+  .field input, .field select{
+    all:unset; width:100%; background:var(--steel-800); border:1px solid var(--steel-700);
+    border-radius:4px; padding:9px 10px; color:var(--steel-100); font-size:13.5px; font-family:var(--sans);
+  }
+  .field input:focus, .field select:focus{border-color:var(--amber);}
+  .modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:18px;}
+
+  .capacity-setting{display:flex; align-items:center; gap:8px; margin-bottom:20px; font-size:12.5px; color:var(--steel-400);}
+  .capacity-setting input{
+    all:unset; width:50px; font-family:var(--mono); background:var(--steel-800);
+    border:1px solid var(--steel-700); border-radius:3px; padding:4px 7px; color:var(--steel-100); text-align:center;
+  }
+
+  @media (max-width:720px){
+    .app{flex-direction:column;}
+    .sidebar{width:100%; flex-direction:row; align-items:center; padding:10px 14px; overflow-x:auto;}
+    .brand{border:none; padding:0 14px 0 0; margin:0;}
+    .sidebar-foot{display:none;}
+    .nav{flex-direction:row; padding:0;}
+    .main{padding:18px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">HELICAL INDUSTRIES</div>
+      <div class="brand-name">Job Tracker</div>
+    </div>
+    <div class="nav">
+      <button class="nav-btn active" data-view="jobs"><span class="nav-dot"></span>Jobs</button>
+      <button class="nav-btn" data-view="capacity"><span class="nav-dot"></span>Capacity</button>
+    </div>
+    <div class="sidebar-foot">v0.1 — local storage</div>
+  </div>
+
+  <div class="main">
+
+    <!-- ===================== JOBS VIEW ===================== -->
+    <div class="view active" id="view-jobs">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Jobs</h1>
+          <div class="page-sub">Track estimated vs. actual hours per job, item by item.</div>
+        </div>
+        <button class="btn btn-primary" id="btn-new-job">+ New job</button>
+      </div>
+
+      <div class="stat-row" id="stat-row"></div>
+
+      <div id="jobs-list"></div>
+    </div>
+
+    <!-- ===================== CAPACITY VIEW ===================== -->
+    <div class="view" id="view-capacity">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Capacity</h1>
+          <div class="page-sub">Outstanding estimated hours, laid against job due dates.</div>
+        </div>
+      </div>
+      <div class="capacity-setting">
+        Daily capacity
+        <input type="number" id="daily-capacity" min="1" step="0.5">
+        hrs/day
+      </div>
+      <div class="capacity-grid" id="capacity-grid"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== NEW JOB MODAL ===================== -->
+<div class="modal-backdrop" id="modal-new-job">
+  <div class="modal">
+    <h3>New job</h3>
+    <div class="field">
+      <label>Customer</label>
+      <input type="text" id="nj-customer" placeholder="e.g. Western Ag Co">
+    </div>
+    <div class="field">
+      <label>Job name / description</label>
+      <input type="text" id="nj-name" placeholder="e.g. Bracket set — 40 off">
+    </div>
+    <div class="field">
+      <label>Due date</label>
+      <input type="date" id="nj-due">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="nj-cancel">Cancel</button>
+      <button class="btn btn-primary" id="nj-save">Create job</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* =========================================================
+     DATA LAYER
+     Every read/write to storage goes through these functions.
+     Swap the bodies of these for Supabase calls later — nothing
+     above this layer needs to change.
+  ========================================================= */
+  const STORAGE_KEY = "helical_erp_v1";
+
+  function loadState(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(raw) return JSON.parse(raw);
+    }catch(e){ console.error("Failed to load state", e); }
+    return { jobs: [], settings: { dailyCapacityHours: 8 } };
+  }
+  function persistState(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch(e){ console.error("Failed to save state", e); }
+  }
+
+  let state = loadState();
+
+  function uid(prefix){
+    return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+  }
+
+  function getJobs(){ return state.jobs; }
+
+  function saveJob({customer, name, due}){
+    const job = {
+      id: uid("job"),
+      customer: customer || "—",
+      name: name || "Untitled job",
+      due: due || null,
+      status: "quoted",
+      createdAt: new Date().toISOString(),
+      items: []
+    };
+    state.jobs.unshift(job);
+    persistState();
+    return job;
+  }
+
+  function deleteJob(jobId){
+    state.jobs = state.jobs.filter(j => j.id !== jobId);
+    persistState();
+  }
+
+  function updateJobStatus(jobId, status){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(job){ job.status = status; persistState(); }
+  }
+
+  function addItem(jobId, item){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    job.items.push({
+      id: uid("item"),
+      description: item.description || "New item",
+      machine: item.machine || "laser",
+      estimatedHours: Number(item.estimatedHours) || 0,
+      actualHours: 0
+    });
+    persistState();
+  }
+
+  function updateItem(jobId, itemId, patch){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return;
+    Object.assign(item, patch);
+    persistState();
+  }
+
+  function logTime(jobId, itemId, hours){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return;
+    item.actualHours = Math.max(0, (Number(item.actualHours) || 0) + Number(hours));
+    persistState();
+  }
+
+  function deleteItem(jobId, itemId){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    job.items = job.items.filter(i => i.id !== itemId);
+    persistState();
+  }
+
+  function setDailyCapacity(hours){
+    state.settings.dailyCapacityHours = Number(hours) || 8;
+    persistState();
+  }
+
+  /* helper roll-ups */
+  function jobEstimated(job){ return job.items.reduce((s,i)=>s+(Number(i.estimatedHours)||0),0); }
+  function jobActual(job){ return job.items.reduce((s,i)=>s+(Number(i.actualHours)||0),0); }
+  function jobRemaining(job){ return Math.max(0, jobEstimated(job) - jobActual(job)); }
+
+  /* =========================================================
+     RENDER — JOBS VIEW
+  ========================================================= */
+  const jobsListEl = document.getElementById("jobs-list");
+  const statRowEl = document.getElementById("stat-row");
+  const openJobIds = new Set();
+
+  const MACHINES = [
+    ["laser","Laser"], ["lathe","Lathe"], ["mill","Mill"],
+    ["brake","Press brake"], ["fab","Fab / weld"], ["other","Other"]
+  ];
+  const STATUSES = ["quoted","scheduled","in_progress","done"];
+  const STATUS_LABEL = { quoted:"Quoted", scheduled:"Scheduled", in_progress:"In progress", done:"Done" };
+
+  function fmtHours(n){ return (Math.round(n*10)/10).toString(); }
+
+  function daysUntil(dateStr){
+    if(!dateStr) return null;
+    const today = new Date(); today.setHours(0,0,0,0);
+    const due = new Date(dateStr + "T00:00:00");
+    return Math.round((due - today) / 86400000);
+  }
+
+  function renderStats(){
+    const jobs = getJobs().filter(j => j.status !== "done");
+    const totalRemaining = jobs.reduce((s,j)=>s+jobRemaining(j),0);
+    const overdue = jobs.filter(j => { const d = daysUntil(j.due); return d !== null && d < 0; }).length;
+    const dueSoon = jobs.filter(j => { const d = daysUntil(j.due); return d !== null && d >= 0 && d <= 2; }).length;
+
+    statRowEl.innerHTML = `
+      <div class="stat">
+        <div class="stat-label">Active jobs</div>
+        <div class="stat-value">${jobs.length}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Hours remaining</div>
+        <div class="stat-value">${fmtHours(totalRemaining)}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Due ≤ 2 days</div>
+        <div class="stat-value ${dueSoon>0?'warn':''}">${dueSoon}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Overdue</div>
+        <div class="stat-value ${overdue>0?'bad':''}">${overdue}</div>
+      </div>
+    `;
+  }
+
+  function renderJobs(){
+    const jobs = getJobs();
+    if(jobs.length === 0){
+      jobsListEl.innerHTML = `
+        <div class="card">
+          <div class="empty">
+            <div class="empty-title">No jobs yet</div>
+            <div>Add your first job to start tracking estimated vs. actual hours.</div>
+          </div>
+        </div>`;
+      renderStats();
+      return;
+    }
+
+    jobsListEl.innerHTML = jobs.map(job => {
+      const est = jobEstimated(job), act = jobActual(job);
+      const d = daysUntil(job.due);
+      let dueClass = "";
+      if(d !== null){ if(d < 0) dueClass = "due-late"; else if(d <= 2) dueClass = "due-soon"; }
+      const dueLabel = job.due
+        ? (d < 0 ? `${Math.abs(d)}d overdue` : d === 0 ? "due today" : `due in ${d}d`)
+        : "no due date";
+
+      const itemsRows = job.items.map(item => `
+        <tr data-item="${item.id}">
+          <td><input class="item-desc-input" value="${escapeAttr(item.description)}" data-field="description"></td>
+          <td>
+            <select class="machine-select" data-field="machine">
+              ${MACHINES.map(([v,l]) => `<option value="${v}" ${item.machine===v?'selected':''}>${l}</option>`).join("")}
+            </select>
+          </td>
+          <td class="num"><input class="hours-input" type="number" step="0.25" min="0" value="${item.estimatedHours}" data-field="estimatedHours"></td>
+          <td class="num" style="font-family:var(--mono); color:${item.actualHours > item.estimatedHours && item.estimatedHours>0 ? 'var(--red)':'var(--steel-200)'}">${fmtHours(item.actualHours)}</td>
+          <td class="num">
+            <button class="btn btn-ghost btn-sm log-time-btn" data-log="0.25">+15m</button>
+            <button class="btn btn-ghost btn-sm log-time-btn" data-log="1">+1h</button>
+          </td>
+          <td class="num"><button class="btn btn-danger del-item-btn">✕</button></td>
+        </tr>
+      `).join("");
+
+      return `
+      <div class="card" data-job="${job.id}">
+        <div class="job-head">
+          <div class="job-title-block">
+            <div>
+              <div class="job-name">${escapeHtml(job.name)}</div>
+              <div class="job-customer">${escapeHtml(job.customer)}</div>
+            </div>
+          </div>
+          <div class="job-metrics">
+            <select class="machine-select status-select" data-status>
+              ${STATUSES.map(s => `<option value="${s}" ${job.status===s?'selected':''}>${STATUS_LABEL[s]}</option>`).join("")}
+            </select>
+            <span><span class="lbl">Est</span>${fmtHours(est)}h</span>
+            <span><span class="lbl">Actual</span>${fmtHours(act)}h</span>
+            <span class="${dueClass}">${dueLabel}</span>
+            <button class="btn btn-danger del-job-btn" title="Delete job">✕</button>
+          </div>
+        </div>
+        <div class="job-body ${openJobIds.has(job.id)?'open':''}">
+          <table>
+            <thead>
+              <tr><th>Item</th><th>Machine</th><th style="text-align:right">Est. hrs</th><th style="text-align:right">Actual</th><th></th><th></th></tr>
+            </thead>
+            <tbody>
+              ${itemsRows}
+              <tr class="add-item-row">
+                <td colspan="6"><button class="btn btn-ghost btn-sm add-item-btn">+ Add item</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    }).join("");
+
+    renderStats();
+    wireJobEvents();
+  }
+
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function escapeAttr(s){ return escapeHtml(s); }
+
+  function wireJobEvents(){
+    jobsListEl.querySelectorAll(".job-head").forEach(head => {
+      head.addEventListener("click", (e) => {
+        if(e.target.closest("select") || e.target.closest("button")) return;
+        const card = head.closest(".card");
+        const jobId = card.getAttribute("data-job");
+        const body = card.querySelector(".job-body");
+        if(openJobIds.has(jobId)){ openJobIds.delete(jobId); body.classList.remove("open"); }
+        else { openJobIds.add(jobId); body.classList.add("open"); }
+      });
+    });
+
+    jobsListEl.querySelectorAll(".status-select").forEach(sel => {
+      sel.addEventListener("click", e => e.stopPropagation());
+      sel.addEventListener("change", () => {
+        const jobId = sel.closest(".card").getAttribute("data-job");
+        updateJobStatus(jobId, sel.value);
+        renderJobs(); renderCapacity();
+      });
+    });
+
+    jobsListEl.querySelectorAll(".del-job-btn").forEach(btn => {
+      btn.addEventListener("click", e => {
+        e.stopPropagation();
+        const jobId = btn.closest(".card").getAttribute("data-job");
+        if(confirm("Delete this job and all its items?")){
+          deleteJob(jobId); renderJobs(); renderCapacity();
+        }
+      });
+    });
+
+    jobsListEl.querySelectorAll(".add-item-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const jobId = btn.closest(".card").getAttribute("data-job");
+        addItem(jobId, { description:"New item", machine:"laser", estimatedHours:1 });
+        openJobIds.add(jobId);
+        renderJobs(); renderCapacity();
+      });
+    });
+
+    jobsListEl.querySelectorAll("tr[data-item]").forEach(row => {
+      const card = row.closest(".card");
+      const jobId = card.getAttribute("data-job");
+      const itemId = row.getAttribute("data-item");
+
+      row.querySelectorAll("[data-field]").forEach(input => {
+        const field = input.getAttribute("data-field");
+        const evt = input.tagName === "SELECT" ? "change" : "change";
+        input.addEventListener(evt, () => {
+          const val = field === "estimatedHours" ? Number(input.value) : input.value;
+          updateItem(jobId, itemId, { [field]: val });
+          renderJobs(); renderCapacity();
+        });
+      });
+
+      row.querySelectorAll(".log-time-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          logTime(jobId, itemId, Number(btn.getAttribute("data-log")));
+          openJobIds.add(jobId);
+          renderJobs(); renderCapacity();
+        });
+      });
+
+      row.querySelector(".del-item-btn").addEventListener("click", () => {
+        deleteItem(jobId, itemId);
+        openJobIds.add(jobId);
+        renderJobs(); renderCapacity();
+      });
+    });
+  }
+
+  /* =========================================================
+     RENDER — CAPACITY VIEW
+     Spreads each job's remaining hours evenly across the
+     working days between today and its due date.
+  ========================================================= */
+  const capacityGridEl = document.getElementById("capacity-grid");
+  const dailyCapInput = document.getElementById("daily-capacity");
+
+  function isWeekday(date){ const d = date.getDay(); return d !== 0 && d !== 6; }
+
+  function renderCapacity(){
+    dailyCapInput.value = state.settings.dailyCapacityHours;
+
+    const today = new Date(); today.setHours(0,0,0,0);
+    const days = [];
+    for(let i=0; i<10; i++){
+      const d = new Date(today); d.setDate(d.getDate()+i);
+      if(isWeekday(d)) days.push({ date:d, jobs:[] });
+      if(days.length >= 7) break;
+    }
+
+    const jobs = getJobs().filter(j => j.status !== "done" && jobRemaining(j) > 0);
+
+    jobs.forEach(job => {
+      const remaining = jobRemaining(job);
+      let targetDays = days;
+      if(job.due){
+        const due = new Date(job.due + "T00:00:00");
+        const inWindow = days.filter(d => d.date <= due);
+        if(inWindow.length) targetDays = inWindow;
+      }
+      const perDay = remaining / targetDays.length;
+      targetDays.forEach(d => d.jobs.push({ name: job.name, hours: perDay }));
+    });
+
+    const cap = state.settings.dailyCapacityHours;
+
+    capacityGridEl.innerHTML = days.map(d => {
+      const total = d.jobs.reduce((s,j)=>s+j.hours,0);
+      const pct = Math.min(100, (total / cap) * 100);
+      let fillClass = "";
+      if(total > cap) fillClass = "bad"; else if(total > cap*0.8) fillClass = "warn";
+      const isToday = d.date.getTime() === today.getTime();
+
+      return `
+      <div class="day-card ${isToday?'today':''}">
+        <div class="day-head">
+          <span class="day-name">${d.date.toLocaleDateString(undefined,{weekday:'short'})}</span>
+          <span class="day-date">${d.date.toLocaleDateString(undefined,{month:'short', day:'numeric'})}</span>
+        </div>
+        <div class="day-load-bar"><div class="day-load-fill ${fillClass}" style="width:${pct}%"></div></div>
+        <div class="day-total">${fmtHours(total)}h <span class="day-cap">/ ${cap}h</span></div>
+        <div class="day-jobs">
+          ${d.jobs.slice(0,4).map(j => `<div class="day-job-chip"><span>${escapeHtml(j.name)}</span><span>${fmtHours(j.hours)}h</span></div>`).join("")}
+          ${d.jobs.length>4 ? `<div class="day-job-chip"><span>+${d.jobs.length-4} more</span></div>` : ""}
+          ${d.jobs.length===0 ? `<div class="day-job-chip" style="color:var(--steel-600)">Clear</div>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  dailyCapInput.addEventListener("change", () => {
+    setDailyCapacity(dailyCapInput.value);
+    renderCapacity();
+  });
+
+  /* =========================================================
+     NAV + MODAL
+  ========================================================= */
+  document.querySelectorAll(".nav-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("view-" + btn.getAttribute("data-view")).classList.add("active");
+      if(btn.getAttribute("data-view") === "capacity") renderCapacity();
+    });
+  });
+
+  const modal = document.getElementById("modal-new-job");
+  document.getElementById("btn-new-job").addEventListener("click", () => {
+    document.getElementById("nj-customer").value = "";
+    document.getElementById("nj-name").value = "";
+    document.getElementById("nj-due").value = "";
+    modal.classList.add("open");
+    document.getElementById("nj-name").focus();
+  });
+  document.getElementById("nj-cancel").addEventListener("click", () => modal.classList.remove("open"));
+  modal.addEventListener("click", e => { if(e.target === modal) modal.classList.remove("open"); });
+  document.getElementById("nj-save").addEventListener("click", () => {
+    const name = document.getElementById("nj-name").value.trim();
+    if(!name){ document.getElementById("nj-name").focus(); return; }
+    const job = saveJob({
+      customer: document.getElementById("nj-customer").value.trim(),
+      name,
+      due: document.getElementById("nj-due").value
+    });
+    openJobIds.add(job.id);
+    modal.classList.remove("open");
+    renderJobs(); renderCapacity();
+  });
+
+  /* =========================================================
+     INIT
+  ========================================================= */
+  renderJobs();
+  renderCapacity();
+})();
+</script>
+</body>
+</html>
