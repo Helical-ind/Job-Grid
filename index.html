@@ -243,7 +243,19 @@
   }
   .material-select:disabled{opacity:.45;}
   .material-select:focus{border-color:var(--amber);}
-  .cut-length-input{width:76px;}
+  .material-color-banner{height:5px; border-radius:6px 6px 0 0;}
+  .color-swatch-btn{
+    all:unset; width:18px; height:18px; border-radius:50%; flex-shrink:0; cursor:pointer;
+    border:1px solid var(--steel-600);
+  }
+  .color-swatch-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:2px;}
+  .color-swatch-option{
+    width:26px; height:26px; border-radius:50%; cursor:pointer; border:2px solid var(--steel-700);
+    display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--steel-400);
+  }
+  .color-swatch-option.selected{border-color:var(--amber);}
+  .color-swatch-option.none-swatch{background:var(--steel-800);}
+  .cut-wide-input{width:72px;}
   .parts-input{
     all:unset; width:56px; background:var(--steel-900); border:1px solid var(--steel-700);
     border-radius:4px; padding:6px 8px; color:var(--steel-100); font-family:var(--mono); text-align:right; font-size:13px; box-sizing:border-box;
@@ -528,6 +540,10 @@
       <input type="text" id="nm-custom-type" placeholder="e.g. 316 stainless">
     </div>
     <div class="field">
+      <label>Colour (this material type's banner)</label>
+      <div class="color-swatch-grid" id="nm-color-grid"></div>
+    </div>
+    <div class="field">
       <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; color:var(--steel-100); margin-bottom:0;">
         <input type="checkbox" id="nm-in-stock" checked style="all:revert; width:auto;">
         Currently in stock
@@ -798,6 +814,16 @@
     persistState();
   }
 
+  function getTypeColor(typeName){
+    return (state.typeColors && state.typeColors[typeName]) || "";
+  }
+
+  function setTypeColor(typeName, hex){
+    if(!state.typeColors) state.typeColors = {};
+    state.typeColors[typeName] = hex;
+    persistState();
+  }
+
   function setItemAssignments(jobId, itemId, employeeIds, scope){
     const job = state.jobs.find(j => j.id === jobId);
     if(!job) return;
@@ -850,7 +876,30 @@
 
   const STATUSES = ["quoted","scheduled","in_progress","done"];
   const PROCESS_OPTIONS = ["Puma","Leo","X5","Router","30W Laser Engraver","20W Laser Engraver","Laser Cutting","Deburr Sander","3D Printer"];
-  const MATERIAL_TYPES = ["1020","1030","1045","4140","38MnV6 Chrome","Brass","LG2 Bronze","PA6 Nylon"];
+  const MATERIAL_TYPES = ["1020","1030","1045","4140","38MnV6 Chrome","Stainless Steel","Brass","LG2 Bronze","PA6 Nylon"];
+  const TYPE_COLOR_PALETTE = [
+    { name:"Yellow", hex:"#eab308" },
+    { name:"White", hex:"#f5f5f5" },
+    { name:"Green", hex:"#22c55e" },
+    { name:"Red", hex:"#ef4444" },
+    { name:"Purple", hex:"#a855f7" },
+    { name:"Pink", hex:"#ec4899" },
+    { name:"Black", hex:"#18181b" },
+    { name:"Blue", hex:"#3b82f6" },
+    { name:"Orange", hex:"#f97316" },
+    { name:"Grey", hex:"#9ca3af" },
+    { name:"Brown", hex:"#92400e" }
+  ];
+  const DEFAULT_TYPE_COLORS = {
+    "1020": "#eab308",
+    "1030": "#f5f5f5",
+    "1045": "#22c55e",
+    "Stainless Steel": "#ef4444",
+    "Brass": "#a855f7",
+    "LG2 Bronze": "#ec4899",
+    "PA6 Nylon": "#18181b"
+  };
+  if(!state.typeColors) state.typeColors = { ...DEFAULT_TYPE_COLORS };
   const STATUS_LABEL = { quoted:"Quoted", scheduled:"Scheduled", in_progress:"In progress", done:"Done" };
 
   function fmtHours(n){ return (Math.round(n*10)/10).toString(); }
@@ -910,6 +959,21 @@
 
   function materialLabel(m){
     return `${materialDimsLabel(m)} ${materialTypeLabel(m)}`.trim();
+  }
+
+  function colorSwatchGridHtml(currentHex){
+    return TYPE_COLOR_PALETTE.map(c => `<div class="color-swatch-option ${currentHex===c.hex?'selected':''}" data-hex="${c.hex}" style="background:${c.hex};" title="${escapeHtml(c.name)}"></div>`).join("")
+      + `<div class="color-swatch-option none-swatch ${!currentHex?'selected':''}" data-hex="" title="No colour">✕</div>`;
+  }
+
+  function wireColorSwatchGrid(containerEl, onSelect){
+    containerEl.querySelectorAll(".color-swatch-option").forEach(sw => {
+      sw.addEventListener("click", () => {
+        containerEl.querySelectorAll(".color-swatch-option").forEach(s => s.classList.remove("selected"));
+        sw.classList.add("selected");
+        onSelect(sw.getAttribute("data-hex"));
+      });
+    });
   }
 
   function daysUntil(dateStr){
@@ -1035,9 +1099,9 @@
               </select>
               <input type="text" class="process-input material-other-input" style="display:${matShape==='__other__'?'flex':'none'};" value="${matShape==='__other__'?escapeAttr(cl.material):''}" placeholder="Custom material">
               <span class="field-label">Length</span>
-              <input type="number" class="parts-input cut-field cut-length-input" min="0" step="1" value="${cl.length||''}" placeholder="mm" data-cutfield="length" title="Cut length per piece, mm">
+              <input type="number" class="parts-input cut-field cut-wide-input" min="0" step="1" value="${cl.length||''}" placeholder="mm" data-cutfield="length" title="Cut length per piece, mm">
               <span class="field-label" style="margin-left:auto;">Cut qty</span>
-              <input type="number" class="parts-input cut-field" min="0" step="1" value="${cl.quantity||0}" data-cutfield="quantity" title="Cut quantity, including any setup allowance">
+              <input type="number" class="parts-input cut-field cut-wide-input" min="0" step="1" value="${cl.quantity||0}" data-cutfield="quantity" title="Cut quantity, including any setup allowance">
             </div>
             <div class="item-card-row item-hours-row">
               <span class="field-label">Est</span>
@@ -1496,19 +1560,66 @@
       return;
     }
 
-    materialsListEl.innerHTML = `<table>
-      <thead><tr><th>Material</th><th>In stock</th><th style="text-align:right">Stock (mm)</th><th></th></tr></thead>
-      <tbody>
-        ${materials.map(m => `
-          <tr data-material="${m.id}">
-            <td>${escapeHtml(materialLabel(m))}</td>
-            <td><input type="checkbox" class="mat-instock-toggle" style="accent-color:var(--amber);" ${m.inStock?'checked':''}></td>
-            <td class="num"><input type="number" class="hours-input mat-stockqty-input" min="0" step="1" value="${m.stockQty||0}" style="width:70px;"></td>
-            <td class="num"><button class="btn btn-danger del-material-btn">✕</button></td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>`;
+    const PROFILE_ORDER = ["round","square","hex","hollow"];
+    const groups = {};
+    materials.forEach(m => {
+      const key = materialTypeLabel(m);
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(m);
+    });
+    const groupNames = Object.keys(groups).sort((a,b) => a.localeCompare(b));
+
+    materialsListEl.innerHTML = groupNames.map(typeName => {
+      const items = groups[typeName].slice().sort((a,b) => {
+        const pa = PROFILE_ORDER.indexOf(a.profile), pb = PROFILE_ORDER.indexOf(b.profile);
+        if(pa !== pb) return pa - pb;
+        return materialDimsLabel(a).localeCompare(materialDimsLabel(b));
+      });
+      return `
+      <div class="card">
+        <div class="material-color-banner" style="background:${getTypeColor(typeName) || 'var(--steel-700)'};"></div>
+        <div class="job-head" style="cursor:default;">
+          <div class="job-title-block">
+            <button class="color-swatch-btn" data-type-name="${escapeAttr(typeName)}" style="background:${getTypeColor(typeName) || 'transparent'};" title="Change colour"></button>
+            <div>
+              <div class="job-name">${escapeHtml(typeName)}</div>
+              <div class="job-customer">${items.length} size${items.length===1?'':'s'} stocked</div>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm add-size-btn" data-type-name="${escapeAttr(typeName)}">+ Add size</button>
+        </div>
+        <div class="job-body open">
+          <table>
+            <thead><tr><th>Shape</th><th>Size</th><th>In stock</th><th style="text-align:right">Stock (mm)</th><th></th></tr></thead>
+            <tbody>
+              ${items.map(m => `
+                <tr data-material="${m.id}">
+                  <td>${SHAPE_LABEL[m.profile] || m.profile}</td>
+                  <td>${escapeHtml(materialDimsLabel(m))}</td>
+                  <td><input type="checkbox" class="mat-instock-toggle" style="accent-color:var(--amber);" ${m.inStock?'checked':''}></td>
+                  <td class="num"><input type="number" class="hours-input mat-stockqty-input" min="0" step="1" value="${m.stockQty||0}" style="width:70px;"></td>
+                  <td class="num"><button class="btn btn-danger del-material-btn">✕</button></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    }).join("");
+
+    materialsListEl.querySelectorAll(".color-swatch-btn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const typeName = btn.getAttribute("data-type-name");
+        openPopoverAt(btn, `<div class="popover-title">Colour for ${escapeHtml(typeName)}</div><div class="color-swatch-grid">${colorSwatchGridHtml(getTypeColor(typeName))}</div>`);
+        const grid = popoverEl.querySelector(".color-swatch-grid");
+        wireColorSwatchGrid(grid, (hex) => {
+          setTypeColor(typeName, hex);
+          closePopover();
+          renderMaterials();
+        });
+      });
+    });
 
     materialsListEl.querySelectorAll(".mat-instock-toggle").forEach(cb => {
       cb.addEventListener("change", () => {
@@ -1531,6 +1642,11 @@
           deleteMaterial(id);
           renderMaterials(); renderJobs(); renderCutList();
         }
+      });
+    });
+    materialsListEl.querySelectorAll(".add-size-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        openMaterialModal(btn.getAttribute("data-type-name"));
       });
     });
   }
@@ -1849,9 +1965,27 @@
   const nmCustomTypeField = document.getElementById("nm-custom-type-field");
   nmTypeSelect.addEventListener("change", () => {
     nmCustomTypeField.style.display = nmTypeSelect.value === "__custom__" ? "block" : "none";
+    if(nmTypeSelect.value !== "__custom__"){
+      nmSelectedColor = getTypeColor(nmTypeSelect.value);
+      nmColorGrid.innerHTML = colorSwatchGridHtml(nmSelectedColor);
+      wireColorSwatchGrid(nmColorGrid, (hex) => { nmSelectedColor = hex; });
+    }
+  });
+  document.getElementById("nm-custom-type").addEventListener("change", (e) => {
+    const label = e.target.value.trim();
+    if(label){
+      nmSelectedColor = getTypeColor(label);
+      nmColorGrid.innerHTML = colorSwatchGridHtml(nmSelectedColor);
+      wireColorSwatchGrid(nmColorGrid, (hex) => { nmSelectedColor = hex; });
+    }
   });
 
-  document.getElementById("btn-new-material").addEventListener("click", () => {
+  document.getElementById("btn-new-material").addEventListener("click", () => openMaterialModal(null));
+
+  const nmColorGrid = document.getElementById("nm-color-grid");
+  let nmSelectedColor = "";
+
+  function openMaterialModal(presetTypeName){
     nmProfileSelect.value = "round";
     updateMaterialDimFields();
     document.getElementById("nm-diameter").value = "";
@@ -1860,17 +1994,37 @@
     document.getElementById("nm-af").value = "";
     document.getElementById("nm-od").value = "";
     document.getElementById("nm-id").value = "";
-    nmTypeSelect.value = MATERIAL_TYPES[0];
-    nmCustomTypeField.style.display = "none";
-    document.getElementById("nm-custom-type").value = "";
     document.getElementById("nm-in-stock").checked = true;
     document.getElementById("nm-stock-qty").value = "";
+
+    let presetLabel = "";
+    if(presetTypeName && MATERIAL_TYPES.includes(presetTypeName)){
+      nmTypeSelect.value = presetTypeName;
+      nmCustomTypeField.style.display = "none";
+      document.getElementById("nm-custom-type").value = "";
+      presetLabel = presetTypeName;
+    } else if(presetTypeName){
+      nmTypeSelect.value = "__custom__";
+      nmCustomTypeField.style.display = "block";
+      document.getElementById("nm-custom-type").value = presetTypeName;
+      presetLabel = presetTypeName;
+    } else {
+      nmTypeSelect.value = MATERIAL_TYPES[0];
+      nmCustomTypeField.style.display = "none";
+      document.getElementById("nm-custom-type").value = "";
+      presetLabel = MATERIAL_TYPES[0];
+    }
+
+    nmSelectedColor = getTypeColor(presetLabel);
+    nmColorGrid.innerHTML = colorSwatchGridHtml(nmSelectedColor);
+    wireColorSwatchGrid(nmColorGrid, (hex) => { nmSelectedColor = hex; });
+
     materialModal.classList.add("open");
-  });
+  }
   document.getElementById("nm-cancel").addEventListener("click", () => materialModal.classList.remove("open"));
   materialModal.addEventListener("click", e => { if(e.target === materialModal) materialModal.classList.remove("open"); });
   document.getElementById("nm-save").addEventListener("click", () => {
-    saveMaterial({
+    const savedMat = saveMaterial({
       profile: nmProfileSelect.value,
       diameter: document.getElementById("nm-diameter").value,
       width: document.getElementById("nm-width").value,
@@ -1883,6 +2037,7 @@
       inStock: document.getElementById("nm-in-stock").checked,
       stockQty: document.getElementById("nm-stock-qty").value
     });
+    setTypeColor(materialTypeLabel(savedMat), nmSelectedColor);
     materialModal.classList.remove("open");
     renderMaterials(); renderJobs(); renderCutList();
   });
