@@ -1284,7 +1284,10 @@
 
   function renderStats(){
     const jobs = getJobs().filter(j => j.status !== "done");
-    const totalRemaining = jobs.reduce((s,j)=>s+jobRemaining(j),0);
+    // Scheduled work only counts committed jobs (Scheduled / In progress) — the same
+    // set that actually shows up in Capacity and Priority — not quotes still on the fence.
+    const committedJobs = jobs.filter(j => j.status === "scheduled" || j.status === "in_progress");
+    const totalRemaining = committedJobs.reduce((s,j)=>s+jobRemaining(j),0);
     const overdue = jobs.filter(j => { const d = daysUntil(j.due); return d !== null && d < 0; }).length;
     const dueSoon = jobs.filter(j => { const d = daysUntil(j.due); return d !== null && d >= 0 && d <= 2; }).length;
 
@@ -1294,8 +1297,8 @@
         <div class="stat-value">${jobs.length}</div>
       </div>
       <div class="stat">
-        <div class="stat-label">Hours remaining</div>
-        <div class="stat-value">${fmtHours(totalRemaining)}</div>
+        <div class="stat-label">Scheduled work</div>
+        <div class="stat-value" title="Remaining hours across Scheduled and In-progress jobs only">${fmtHours(totalRemaining)}h</div>
       </div>
       <div class="stat">
         <div class="stat-label">Due ≤ 2 days</div>
