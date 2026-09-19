@@ -297,6 +297,25 @@
   .item-hours-row{font-family:var(--mono); font-size:12.5px; color:var(--steel-200);}
   .item-hours-row .hours-input{width:52px;}
   .log-time-input, .log-time-input-cut{width:44px; margin-left:4px;}
+  .materials-grid{
+    display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:16px; align-items:start;
+  }
+  .materials-grid > .card{margin-bottom:0;}
+  @media (max-width:1000px){
+    .materials-grid{grid-template-columns:1fr;}
+  }
+  tr.stock-low{background:rgba(232,193,12,.14);}
+  tr.stock-low td{color:var(--steel-100);}
+  tr.stock-out{background:rgba(220,38,38,.16);}
+  tr.stock-out td{color:var(--steel-100);}
+  .stock-flag{font-size:10px; font-family:var(--mono); text-transform:uppercase; letter-spacing:.03em; margin-left:6px; padding:1px 6px; border-radius:3px;}
+  .stock-flag.low{background:rgba(232,193,12,.25); color:#f0d33c;}
+  .stock-flag.out{background:rgba(220,38,38,.3); color:#ff8a8a;}
+  .mat-reorder-input{width:64px;}
+  .reorder-card{border-color:var(--red); margin-bottom:16px;}
+  .reorder-row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 18px; border-top:1px solid var(--steel-700); font-size:13px;}
+  .reorder-row:first-child{border-top:none;}
+  .reorder-row .stock-flag{margin-left:0;}
   .operations-list{display:flex; flex-direction:column; gap:6px; margin-bottom:4px;}
   .operation-row{
     background:var(--steel-800); border:1px solid var(--steel-700); border-radius:5px;
@@ -464,9 +483,8 @@
         </div>
         <button class="btn btn-primary" id="btn-new-material">+ New material</button>
       </div>
-      <div class="card" id="materials-card">
-        <div id="materials-list"></div>
-      </div>
+      <div id="reorder-section"></div>
+      <div id="materials-list" class="materials-grid"></div>
     </div>
 
     <!-- ===================== CAPACITY VIEW ===================== -->
@@ -622,6 +640,10 @@
       <label>Stock on hand (mm)</label>
       <input type="number" id="nm-stock-qty" min="0" step="1" placeholder="Total length currently held">
     </div>
+    <div class="field">
+      <label>Reorder at (mm)</label>
+      <input type="number" id="nm-reorder-at" min="0" step="1" placeholder="e.g. 1000">
+    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="nm-cancel">Cancel</button>
       <button class="btn btn-primary" id="nm-save">Add material</button>
@@ -658,6 +680,9 @@
   let state = loadState();
   if(!Array.isArray(state.employees)) state.employees = [];
   if(!Array.isArray(state.materials)) state.materials = [];
+  state.materials.forEach(m => {
+    if(typeof m.reorderAt !== "number") m.reorderAt = 1000;
+  });
   state.jobs.forEach(job => {
     if(typeof job.notes !== "string") job.notes = "";
     if(typeof job.invoiced !== "boolean") job.invoiced = false;
@@ -952,7 +977,8 @@
       materialType: m.materialType || "",
       customType: m.customType || "",
       inStock: m.inStock !== false,
-      stockQty: Number(m.stockQty) || 0
+      stockQty: Number(m.stockQty) || 0,
+      reorderAt: m.reorderAt !== undefined && m.reorderAt !== "" ? Number(m.reorderAt) : 1000
     };
     state.materials.push(material);
     persistState();
@@ -1960,8 +1986,52 @@
      RENDER — MATERIALS VIEW
   ========================================================= */
   const materialsListEl = document.getElementById("materials-list");
+  const reorderSectionEl = document.getElementById("reorder-section");
+
+  function stockStatus(m){
+    if(!m.inStock || (m.stockQty||0) <= 0) return "out";
+    if(m.reorderAt > 0 && m.stockQty <= m.reorderAt) return "low";
+    return "ok";
+  }
+
+  function renderReorderSection(){
+    const materials = getMaterials();
+    const needsReorder = materials.filter(m => stockStatus(m) !== "ok");
+    if(needsReorder.length === 0){
+      reorderSectionEl.innerHTML = "";
+      return;
+    }
+    needsReorder.sort((a,b) => {
+      const sa = stockStatus(a), sb = stockStatus(b);
+      if(sa !== sb) return sa === "out" ? -1 : 1;
+      return (a.stockQty||0) - (b.stockQty||0);
+    });
+    reorderSectionEl.innerHTML = `
+      <div class="card reorder-card">
+        <div class="job-head" style="cursor:default;">
+          <div class="job-title-block">
+            <div>
+              <div class="job-name">Needs reordering</div>
+              <div class="job-customer">${needsReorder.length} size${needsReorder.length===1?'':'s'} at or below its reorder length</div>
+            </div>
+          </div>
+        </div>
+        ${needsReorder.map(m => {
+          const status = stockStatus(m);
+          return `
+          <div class="reorder-row">
+            <span>${escapeHtml(materialTypeLabel(m))} — ${SHAPE_LABEL[m.profile] || m.profile}, ${escapeHtml(materialDimsLabel(m))}</span>
+            <span>
+              ${fmtLength(m.stockQty||0)} on hand
+              <span class="stock-flag ${status}">${status==="out" ? "Out of stock" : "Reorder"}</span>
+            </span>
+          </div>`;
+        }).join("")}
+      </div>`;
+  }
 
   function renderMaterials(){
+    renderReorderSection();
     const materials = getMaterials();
     if(materials.length === 0){
       materialsListEl.innerHTML = `
@@ -2002,17 +2072,21 @@
         </div>
         <div class="job-body open">
           <table>
-            <thead><tr><th>Shape</th><th>Size</th><th>In stock</th><th style="text-align:right">Stock (mm)</th><th></th></tr></thead>
+            <thead><tr><th>Shape</th><th>Size</th><th>In stock</th><th style="text-align:right">Stock (mm)</th><th style="text-align:right">Reorder at (mm)</th><th></th></tr></thead>
             <tbody>
-              ${items.map(m => `
-                <tr data-material="${m.id}">
+              ${items.map(m => {
+                const status = stockStatus(m);
+                return `
+                <tr data-material="${m.id}" class="${status==='low'?'stock-low':status==='out'?'stock-out':''}">
                   <td>${SHAPE_LABEL[m.profile] || m.profile}</td>
-                  <td>${escapeHtml(materialDimsLabel(m))}</td>
+                  <td>${escapeHtml(materialDimsLabel(m))}${status!=="ok" ? `<span class="stock-flag ${status}">${status==="out"?"Out":"Low"}</span>` : ""}</td>
                   <td><input type="checkbox" class="mat-instock-toggle" style="accent-color:var(--amber);" ${m.inStock?'checked':''}></td>
                   <td class="num"><input type="number" class="hours-input mat-stockqty-input" min="0" step="1" value="${m.stockQty||0}" style="width:70px;"></td>
+                  <td class="num"><input type="number" class="hours-input mat-reorder-input" min="0" step="1" value="${m.reorderAt||0}"></td>
                   <td class="num"><button class="btn btn-danger del-material-btn">✕</button></td>
                 </tr>
-              `).join("")}
+              `;
+              }).join("")}
             </tbody>
           </table>
         </div>
@@ -2037,14 +2111,21 @@
       cb.addEventListener("change", () => {
         const id = cb.closest("tr").getAttribute("data-material");
         updateMaterial(id, { inStock: cb.checked });
-        renderJobs(); renderCutList();
+        renderMaterials(); renderJobs(); renderCutList();
       });
     });
     materialsListEl.querySelectorAll(".mat-stockqty-input").forEach(inp => {
       inp.addEventListener("change", () => {
         const id = inp.closest("tr").getAttribute("data-material");
         updateMaterial(id, { stockQty: Number(inp.value) || 0 });
-        renderCutList();
+        renderMaterials(); renderCutList();
+      });
+    });
+    materialsListEl.querySelectorAll(".mat-reorder-input").forEach(inp => {
+      inp.addEventListener("change", () => {
+        const id = inp.closest("tr").getAttribute("data-material");
+        updateMaterial(id, { reorderAt: Number(inp.value) || 0 });
+        renderMaterials();
       });
     });
     materialsListEl.querySelectorAll(".del-material-btn").forEach(btn => {
@@ -2417,6 +2498,7 @@
     document.getElementById("nm-id").value = "";
     document.getElementById("nm-in-stock").checked = true;
     document.getElementById("nm-stock-qty").value = "";
+    document.getElementById("nm-reorder-at").value = "1000";
 
     let presetLabel = "";
     if(presetTypeName && MATERIAL_TYPES.includes(presetTypeName)){
@@ -2456,7 +2538,8 @@
       materialType: nmTypeSelect.value,
       customType: document.getElementById("nm-custom-type").value.trim(),
       inStock: document.getElementById("nm-in-stock").checked,
-      stockQty: document.getElementById("nm-stock-qty").value
+      stockQty: document.getElementById("nm-stock-qty").value,
+      reorderAt: document.getElementById("nm-reorder-at").value
     });
     setTypeColor(materialTypeLabel(savedMat), nmSelectedColor);
     materialModal.classList.remove("open");
