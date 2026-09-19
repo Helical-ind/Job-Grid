@@ -297,6 +297,12 @@
   .item-hours-row{font-family:var(--mono); font-size:12.5px; color:var(--steel-200);}
   .item-hours-row .hours-input{width:52px;}
   .log-time-input, .log-time-input-cut{width:44px; margin-left:4px;}
+  .operations-list{display:flex; flex-direction:column; gap:6px; margin-bottom:4px;}
+  .operation-row{
+    background:var(--steel-800); border:1px solid var(--steel-700); border-radius:5px;
+    padding:8px 9px; display:flex; flex-direction:column; gap:6px;
+  }
+  .add-operation-btn{align-self:flex-start;}
   .cutlist-toggle-row{font-size:12.5px; color:var(--steel-400); cursor:pointer; user-select:none;}
   .cutlist-toggle-row input{accent-color:var(--amber);}
   .cutlist-sub{
@@ -663,6 +669,22 @@
       if(typeof item.notes !== "string") item.notes = "";
       if(item.process === undefined) item.process = item.machine || "";
       if(item.partsNeeded === undefined) item.partsNeeded = item.quantity !== undefined ? Number(item.quantity) : 1;
+      if(!Array.isArray(item.operations) || item.operations.length === 0){
+        // migrate the old single process/hours/assignment fields into the first operation row
+        item.operations = [{
+          id: uid("op"),
+          process: item.process || "",
+          estimatedHours: Number(item.estimatedHours) || 0,
+          actualHours: Number(item.actualHours) || 0,
+          assignedTo: Array.isArray(item.assignedTo) ? item.assignedTo.slice() : []
+        }];
+      }
+      item.operations.forEach(op => {
+        if(typeof op.process !== "string") op.process = "";
+        if(typeof op.estimatedHours !== "number") op.estimatedHours = Number(op.estimatedHours) || 0;
+        if(typeof op.actualHours !== "number") op.actualHours = Number(op.actualHours) || 0;
+        if(!Array.isArray(op.assignedTo)) op.assignedTo = [];
+      });
       if(!item.cutList){
         const hadOldCut = !!(item.material || item.cutLength);
         item.cutList = {
@@ -784,10 +806,13 @@
     job.items.push({
       id: uid("item"),
       description: item.description || "New item",
-      process: item.process || "",
-      estimatedHours: Number(item.estimatedHours) || 0,
-      actualHours: 0,
-      assignedTo: Array.isArray(item.assignedTo) ? item.assignedTo : [],
+      operations: [{
+        id: uid("op"),
+        process: item.process || "",
+        estimatedHours: Number(item.estimatedHours) || 0,
+        actualHours: 0,
+        assignedTo: Array.isArray(item.assignedTo) ? item.assignedTo : []
+      }],
       attachments: [],
       notes: item.notes || "",
       partsNeeded: item.partsNeeded !== undefined ? Number(item.partsNeeded) : 1,
@@ -834,6 +859,36 @@
     persistState();
   }
 
+  function addOperation(jobId, itemId){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return;
+    if(!Array.isArray(item.operations)) item.operations = [];
+    item.operations.push({ id: uid("op"), process:"", estimatedHours:0, actualHours:0, assignedTo:[] });
+    persistState();
+  }
+
+  function deleteOperation(jobId, itemId, opId){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item || !Array.isArray(item.operations) || item.operations.length <= 1) return;
+    item.operations = item.operations.filter(o => o.id !== opId);
+    persistState();
+  }
+
+  function updateOperationField(jobId, itemId, opId, field, value){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(!job) return;
+    const item = job.items.find(i => i.id === itemId);
+    if(!item) return;
+    const op = (item.operations || []).find(o => o.id === opId);
+    if(!op) return;
+    op[field] = value;
+    persistState();
+  }
+
   function logTime(jobId, itemId, hours, scope){
     const job = state.jobs.find(j => j.id === jobId);
     if(!job) return;
@@ -843,7 +898,8 @@
       const cl = ensureCutList(item);
       cl.actualHours = Math.max(0, (Number(cl.actualHours) || 0) + Number(hours));
     } else {
-      item.actualHours = Math.max(0, (Number(item.actualHours) || 0) + Number(hours));
+      const op = (item.operations || []).find(o => o.id === scope);
+      if(op) op.actualHours = Math.max(0, (Number(op.actualHours) || 0) + Number(hours));
     }
     persistState();
   }
@@ -873,7 +929,9 @@
     state.employees = state.employees.filter(e => e.id !== employeeId);
     // unassign anyone pointing at this employee, rather than leaving a dangling id
     state.jobs.forEach(job => job.items.forEach(item => {
-      item.assignedTo = (item.assignedTo || []).filter(id => id !== employeeId);
+      (item.operations || []).forEach(op => {
+        op.assignedTo = (op.assignedTo || []).filter(id => id !== employeeId);
+      });
       if(item.cutList) item.cutList.assignedTo = (item.cutList.assignedTo || []).filter(id => id !== employeeId);
     }));
     persistState();
@@ -931,7 +989,8 @@
     if(scope === "cut"){
       ensureCutList(item).assignedTo = employeeIds;
     } else {
-      item.assignedTo = employeeIds;
+      const op = (item.operations || []).find(o => o.id === scope);
+      if(op) op.assignedTo = employeeIds;
     }
     persistState();
   }
@@ -957,12 +1016,18 @@
     persistState();
   }
 
-  /* helper roll-ups — include cut-prep hours alongside the main operation */
+  /* helper roll-ups — sum every process/operation on an item, plus cut-prep hours */
+  function itemEstimated(item){
+    return (item.operations || []).reduce((s,o)=> s + (Number(o.estimatedHours)||0), 0);
+  }
+  function itemActual(item){
+    return (item.operations || []).reduce((s,o)=> s + (Number(o.actualHours)||0), 0);
+  }
   function jobEstimated(job){
-    return job.items.reduce((s,i)=> s + (Number(i.estimatedHours)||0) + ((i.cutList && i.cutList.enabled) ? (Number(i.cutList.estimatedHours)||0) : 0), 0);
+    return job.items.reduce((s,i)=> s + itemEstimated(i) + ((i.cutList && i.cutList.enabled) ? (Number(i.cutList.estimatedHours)||0) : 0), 0);
   }
   function jobActual(job){
-    return job.items.reduce((s,i)=> s + (Number(i.actualHours)||0) + ((i.cutList && i.cutList.enabled) ? (Number(i.cutList.actualHours)||0) : 0), 0);
+    return job.items.reduce((s,i)=> s + itemActual(i) + ((i.cutList && i.cutList.enabled) ? (Number(i.cutList.actualHours)||0) : 0), 0);
   }
   function jobRemaining(job){ return Math.max(0, jobEstimated(job) - jobActual(job)); }
 
@@ -1039,10 +1104,12 @@
     [...committed, ...quoted].forEach(job => {
       let jobFinish = -1;
       job.items.forEach(item => {
-        const mainRemaining = Math.max(0, (Number(item.estimatedHours)||0) - (Number(item.actualHours)||0));
-        if(mainRemaining > 0){
-          jobFinish = Math.max(jobFinish, runTask(mainRemaining, item.assignedTo, item.process));
-        }
+        (item.operations || []).forEach(op => {
+          const opRemaining = Math.max(0, (Number(op.estimatedHours)||0) - (Number(op.actualHours)||0));
+          if(opRemaining > 0){
+            jobFinish = Math.max(jobFinish, runTask(opRemaining, op.assignedTo, op.process));
+          }
+        });
         if(item.cutList && item.cutList.enabled){
           const cutRemaining = Math.max(0, (Number(item.cutList.estimatedHours)||0) - (Number(item.cutList.actualHours)||0));
           if(cutRemaining > 0){
@@ -1115,20 +1182,27 @@
     return fmtHours(mm) + " mm";
   }
 
-  function assignedLabel(item){
-    const names = (item.assignedTo || [])
+  function assignedNames(assignedTo){
+    return (assignedTo || [])
       .map(id => { const e = getEmployees().find(x => x.id === id); return e ? e.name : null; })
       .filter(Boolean);
+  }
+
+  function assignedLabel(assignedTo){
+    const names = assignedNames(assignedTo);
     if(names.length === 0) return "Unassigned";
     if(names.length === 1) return names[0];
     return names.length + " assigned";
   }
 
+  function getAssignedArray(item, scope){
+    if(scope === "cut") return (item.cutList && item.cutList.assignedTo) || [];
+    const op = (item.operations || []).find(o => o.id === scope);
+    return op ? (op.assignedTo || []) : [];
+  }
+
   function cutAssignedLabel(item){
-    const arr = (item.cutList && item.cutList.assignedTo) || [];
-    const names = arr
-      .map(id => { const e = getEmployees().find(x => x.id === id); return e ? e.name : null; })
-      .filter(Boolean);
+    const names = assignedNames(item.cutList && item.cutList.assignedTo);
     if(names.length === 0) return "Cut: unassigned";
     if(names.length === 1) return "Cut: " + names[0];
     return "Cut: " + names.length + " assigned";
@@ -1244,7 +1318,6 @@
 
       const itemsCards = job.items.map(item => {
         const cl = item.cutList || {};
-        const isCustomProcess = item.process && !PROCESS_OPTIONS.includes(item.process);
         const matShape = cl.materialShape || "";
         const matSizeKey = cl.materialSizeKey || "";
         const sizeOptions = (matShape && matShape !== "__other__")
@@ -1253,34 +1326,48 @@
         const typeMats = (matShape && matShape !== "__other__" && matSizeKey)
           ? getMaterials().filter(m => m.profile === matShape && materialDimsKey(m) === matSizeKey)
           : [];
+        const ops = item.operations || [];
+        const operationsHtml = ops.map(op => {
+          const isCustomProcess = op.process && !PROCESS_OPTIONS.includes(op.process);
+          return `
+          <div class="operation-row" data-op="${op.id}">
+            <div class="item-card-row">
+              <select class="process-select">
+                <option value="" ${!op.process?'selected':''}>Process…</option>
+                ${PROCESS_OPTIONS.map(p => `<option value="${p}" ${op.process===p?'selected':''}>${p}</option>`).join("")}
+                <option value="__other__" ${isCustomProcess?'selected':''}>Other…</option>
+              </select>
+              <input type="text" class="process-input process-other-input" style="display:${isCustomProcess?'flex':'none'};" value="${isCustomProcess?escapeAttr(op.process):''}" placeholder="Custom process">
+              <button class="btn btn-ghost btn-sm assign-btn">${escapeHtml(assignedLabel(op.assignedTo))}</button>
+              ${ops.length > 1 ? `<button class="btn btn-danger btn-sm del-operation-btn" style="margin-left:auto;">✕</button>` : ""}
+            </div>
+            <div class="item-card-row item-hours-row">
+              <span class="field-label">Est</span>
+              <input class="hours-input op-hours-input" type="number" step="0.25" min="0" value="${op.estimatedHours}">
+              <span class="field-label">Actual</span>
+              <span style="color:${op.actualHours > op.estimatedHours && op.estimatedHours>0 ? 'var(--red)':'var(--steel-200)'}">${fmtHours(op.actualHours)}h</span>
+              <button class="btn btn-ghost btn-sm log-time-btn" data-log="-0.25">-15m</button>
+              <button class="btn btn-ghost btn-sm log-time-btn" data-log="-1">-1h</button>
+              <button class="btn btn-ghost btn-sm log-time-btn" data-log="0.25">+15m</button>
+              <button class="btn btn-ghost btn-sm log-time-btn" data-log="1">+1h</button>
+              <input type="number" step="0.25" min="0" class="hours-input log-time-input" placeholder="hrs">
+              <button class="btn btn-ghost btn-sm log-time-typed-btn">Log</button>
+            </div>
+          </div>`;
+        }).join("");
         return `
         <div class="item-card" data-item="${item.id}">
           <div class="item-card-row">
             <input class="item-desc-input" value="${escapeAttr(item.description)}" data-field="description" placeholder="Item name">
-            <select class="process-select">
-              <option value="" ${!item.process?'selected':''}>Process…</option>
-              ${PROCESS_OPTIONS.map(p => `<option value="${p}" ${item.process===p?'selected':''}>${p}</option>`).join("")}
-              <option value="__other__" ${isCustomProcess?'selected':''}>Other…</option>
-            </select>
-            <input type="text" class="process-input process-other-input" style="display:${isCustomProcess?'flex':'none'};" value="${isCustomProcess?escapeAttr(item.process):''}" placeholder="Custom process">
             <span class="field-label">Parts</span>
             <input type="number" class="parts-input" min="0" step="1" value="${item.partsNeeded}" data-field="partsNeeded" title="Parts needed">
-            <button class="btn btn-ghost btn-sm assign-btn">${escapeHtml(assignedLabel(item))}</button>
             <button class="btn btn-ghost btn-sm files-btn">📎${item.attachments && item.attachments.length ? ' '+item.attachments.length : ''}</button>
             <button class="btn btn-danger del-item-btn" style="margin-left:auto;">✕</button>
           </div>
 
-          <div class="item-card-row item-hours-row">
-            <span class="field-label">Est</span>
-            <input class="hours-input" type="number" step="0.25" min="0" value="${item.estimatedHours}" data-field="estimatedHours">
-            <span class="field-label">Actual</span>
-            <span style="color:${item.actualHours > item.estimatedHours && item.estimatedHours>0 ? 'var(--red)':'var(--steel-200)'}">${fmtHours(item.actualHours)}h</span>
-            <button class="btn btn-ghost btn-sm log-time-btn" data-log="-0.25" data-scope="item">-15m</button>
-            <button class="btn btn-ghost btn-sm log-time-btn" data-log="-1" data-scope="item">-1h</button>
-            <button class="btn btn-ghost btn-sm log-time-btn" data-log="0.25" data-scope="item">+15m</button>
-            <button class="btn btn-ghost btn-sm log-time-btn" data-log="1" data-scope="item">+1h</button>
-            <input type="number" step="0.25" min="0" class="hours-input log-time-input" placeholder="hrs">
-            <button class="btn btn-ghost btn-sm log-time-typed-btn" data-scope="item">Log</button>
+          <div class="operations-list">
+            ${operationsHtml}
+            <button class="btn btn-ghost btn-sm add-operation-btn">+ Add process</button>
           </div>
 
           <label class="item-card-row cutlist-toggle-row">
@@ -1497,7 +1584,7 @@
       const jobId = cardEl.closest(".card").getAttribute("data-job");
       const itemId = cardEl.getAttribute("data-item");
 
-      const NUMERIC_FIELDS = ["estimatedHours","partsNeeded"];
+      const NUMERIC_FIELDS = ["partsNeeded"];
       cardEl.querySelectorAll("[data-field]").forEach(input => {
         const field = input.getAttribute("data-field");
         input.addEventListener("change", () => {
@@ -1523,25 +1610,80 @@
         renderJobs(); renderCapacity(); renderCutList();
       });
 
-      const processSelect = cardEl.querySelector(".process-select");
-      const processOtherInput = cardEl.querySelector(".process-other-input");
-      processSelect.addEventListener("change", () => {
-        if(processSelect.value === "__other__"){
-          processOtherInput.style.display = "flex";
-          processOtherInput.value = "";
-          processOtherInput.focus();
-          updateItem(jobId, itemId, { process: "" });
+      cardEl.querySelectorAll(".operation-row").forEach(opRow => {
+        const opId = opRow.getAttribute("data-op");
+
+        const processSelect = opRow.querySelector(".process-select");
+        const processOtherInput = opRow.querySelector(".process-other-input");
+        processSelect.addEventListener("change", () => {
+          if(processSelect.value === "__other__"){
+            processOtherInput.style.display = "flex";
+            processOtherInput.value = "";
+            processOtherInput.focus();
+            updateOperationField(jobId, itemId, opId, "process", "");
+            renderCapacity();
+          } else {
+            processOtherInput.style.display = "none";
+            updateOperationField(jobId, itemId, opId, "process", processSelect.value);
+            renderJobs(); renderCapacity();
+          }
+        });
+        processOtherInput.addEventListener("change", () => {
+          updateOperationField(jobId, itemId, opId, "process", processOtherInput.value.trim());
           renderCapacity();
-        } else {
-          processOtherInput.style.display = "none";
-          updateItem(jobId, itemId, { process: processSelect.value });
+        });
+
+        const opHoursInput = opRow.querySelector(".op-hours-input");
+        opHoursInput.addEventListener("change", () => {
+          updateOperationField(jobId, itemId, opId, "estimatedHours", Number(opHoursInput.value));
           renderJobs(); renderCapacity();
+        });
+
+        opRow.querySelectorAll(".log-time-btn").forEach(btn => {
+          btn.addEventListener("click", () => {
+            logTime(jobId, itemId, Number(btn.getAttribute("data-log")), opId);
+            openJobIds.add(jobId);
+            renderJobs(); renderCapacity();
+          });
+        });
+
+        const opTypedInput = opRow.querySelector(".log-time-input");
+        const opTypedBtn = opRow.querySelector(".log-time-typed-btn");
+        const submitOpTyped = () => {
+          const v = Number(opTypedInput.value);
+          if(v > 0){
+            logTime(jobId, itemId, v, opId);
+            openJobIds.add(jobId);
+            renderJobs(); renderCapacity();
+          }
+        };
+        opTypedBtn.addEventListener("click", submitOpTyped);
+        opTypedInput.addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); submitOpTyped(); } });
+
+        opRow.querySelector(".assign-btn").addEventListener("click", (e) => {
+          e.stopPropagation();
+          openPopoverAt(e.currentTarget, buildAssignPopoverHtml(jobId, itemId, opId));
+          wireAssignPopover(jobId, itemId, opId, e.currentTarget);
+        });
+
+        const delOpBtn = opRow.querySelector(".del-operation-btn");
+        if(delOpBtn){
+          delOpBtn.addEventListener("click", () => {
+            deleteOperation(jobId, itemId, opId);
+            openJobIds.add(jobId);
+            renderJobs(); renderCapacity();
+          });
         }
       });
-      processOtherInput.addEventListener("change", () => {
-        updateItem(jobId, itemId, { process: processOtherInput.value.trim() });
-        renderCapacity();
-      });
+
+      const addOperationBtn = cardEl.querySelector(".add-operation-btn");
+      if(addOperationBtn){
+        addOperationBtn.addEventListener("click", () => {
+          addOperation(jobId, itemId);
+          openJobIds.add(jobId);
+          renderJobs(); renderCapacity();
+        });
+      }
 
       const shapeSelect = cardEl.querySelector(".material-shape-select");
       const sizeSelect = cardEl.querySelector(".material-size-select");
@@ -1585,26 +1727,13 @@
         updateItemNotes(jobId, itemId, e.target.value);
       });
 
-      cardEl.querySelectorAll(".log-time-btn").forEach(btn => {
+      cardEl.querySelectorAll(".cutlist-sub .log-time-btn").forEach(btn => {
         btn.addEventListener("click", () => {
           logTime(jobId, itemId, Number(btn.getAttribute("data-log")), btn.getAttribute("data-scope"));
           openJobIds.add(jobId);
           renderJobs(); renderCapacity();
         });
       });
-
-      const typedInput = cardEl.querySelector(".log-time-input");
-      const typedBtn = cardEl.querySelector(".log-time-typed-btn");
-      const submitTyped = () => {
-        const v = Number(typedInput.value);
-        if(v > 0){
-          logTime(jobId, itemId, v, "item");
-          openJobIds.add(jobId);
-          renderJobs(); renderCapacity();
-        }
-      };
-      typedBtn.addEventListener("click", submitTyped);
-      typedInput.addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); submitTyped(); } });
 
       const typedCutInput = cardEl.querySelector(".log-time-input-cut");
       const typedCutBtn = cardEl.querySelector(".cutlist-sub .log-time-typed-btn");
@@ -1625,12 +1754,6 @@
         deleteItem(jobId, itemId);
         openJobIds.add(jobId);
         renderJobs(); renderCapacity(); renderCutList();
-      });
-
-      cardEl.querySelector(".assign-btn").addEventListener("click", (e) => {
-        e.stopPropagation();
-        openPopoverAt(e.currentTarget, buildAssignPopoverHtml(jobId, itemId, "item"));
-        wireAssignPopover(jobId, itemId, "item", e.currentTarget);
       });
 
       const cutAssignBtn = cardEl.querySelector(".cut-assign-btn");
@@ -1687,7 +1810,7 @@
   function buildAssignPopoverHtml(jobId, itemId, scope){
     const job = getJobs().find(j => j.id === jobId);
     const item = job.items.find(i => i.id === itemId);
-    const arr = scope === "cut" ? ((item.cutList && item.cutList.assignedTo) || []) : item.assignedTo;
+    const arr = getAssignedArray(item, scope);
     const emps = getEmployees();
     if(emps.length === 0){
       return `<div class="popover-title">${scope==="cut"?"Assign cutting":"Assign staff"}</div><div class="popover-note">No employees yet — add your team on the Team tab.</div>`;
@@ -1705,12 +1828,12 @@
       cb.addEventListener("change", () => {
         const job = getJobs().find(j => j.id === jobId);
         const item = job.items.find(i => i.id === itemId);
-        const current = scope === "cut" ? ((item.cutList && item.cutList.assignedTo) || []) : item.assignedTo;
+        const current = getAssignedArray(item, scope);
         const empId = cb.getAttribute("data-emp");
         const set = new Set(current);
         if(cb.checked) set.add(empId); else set.delete(empId);
         setItemAssignments(jobId, itemId, Array.from(set), scope);
-        btn.textContent = scope === "cut" ? cutAssignedLabel(item) : assignedLabel(item);
+        btn.textContent = scope === "cut" ? cutAssignedLabel(item) : assignedLabel(getAssignedArray(item, scope));
         renderCapacity(); renderTeam();
       });
     });
@@ -2110,14 +2233,16 @@
       if(targetDays.length === 0) return;
       job.items.forEach(item => {
         const tasks = [];
-        const mainRemaining = Math.max(0, (Number(item.estimatedHours)||0) - (Number(item.actualHours)||0));
-        if(mainRemaining > 0){
-          tasks.push({ remaining: mainRemaining, assigned: (item.assignedTo && item.assignedTo.length) ? item.assignedTo : ["__unassigned__"] });
-        }
+        (item.operations || []).forEach(op => {
+          const opRemaining = Math.max(0, (Number(op.estimatedHours)||0) - (Number(op.actualHours)||0));
+          if(opRemaining > 0){
+            tasks.push({ remaining: opRemaining, assigned: (op.assignedTo && op.assignedTo.length) ? op.assignedTo : ["__unassigned__"], process: op.process });
+          }
+        });
         if(item.cutList && item.cutList.enabled){
           const cutRemaining = Math.max(0, (Number(item.cutList.estimatedHours)||0) - (Number(item.cutList.actualHours)||0));
           if(cutRemaining > 0){
-            tasks.push({ remaining: cutRemaining, assigned: (item.cutList.assignedTo && item.cutList.assignedTo.length) ? item.cutList.assignedTo : ["__unassigned__"] });
+            tasks.push({ remaining: cutRemaining, assigned: (item.cutList.assignedTo && item.cutList.assignedTo.length) ? item.cutList.assignedTo : ["__unassigned__"], process: null });
           }
         }
         tasks.forEach(t => {
@@ -2126,14 +2251,13 @@
             if(!hours[empId]) return;
             targetDays.forEach(d => { hours[empId][days.indexOf(d)] += perDay; });
           });
-        });
 
-        // machine load — the operation ties up the machine itself regardless of who's running it
-        if(mainRemaining > 0 && item.process && PROCESS_OPTIONS.includes(item.process)){
-          const machineKey = "machine:" + item.process;
-          const perDay = mainRemaining / targetDays.length;
-          targetDays.forEach(d => { hours[machineKey][days.indexOf(d)] += perDay; });
-        }
+          // machine load — the operation ties up the machine itself regardless of who's running it
+          if(t.process && PROCESS_OPTIONS.includes(t.process)){
+            const machineKey = "machine:" + t.process;
+            targetDays.forEach(d => { hours[machineKey][days.indexOf(d)] += perDay; });
+          }
+        });
       });
     });
 
