@@ -492,7 +492,7 @@
       <div class="page-head">
         <div>
           <h1 class="page-title">Capacity</h1>
-          <div class="page-sub">Outstanding estimated hours, laid against job due dates.</div>
+          <div class="page-sub">Outstanding estimated hours, laid against job due dates. Each box shows booked / available hours and fills green as the day fills up — red once under 45 minutes is left.</div>
         </div>
       </div>
       <div class="capacity-setting">
@@ -2342,11 +2342,20 @@
       });
     });
 
-    function cellClass(v){
-      if(v <= 0) return "zero";
-      if(v > cap) return "bad";
-      if(v > cap*0.8) return "warn";
-      return "ok";
+    // Cell shows "booked / available" and fills left-to-right as a percentage of
+    // the day's available hours — green while there's still real room, solid red
+    // once less than 45 minutes of that day is left uncommitted.
+    function capacityCellHtml(v, available){
+      if(available <= 0){
+        return `<td class="capacity-cell zero">—</td>`;
+      }
+      const remaining = available - v;
+      const critical = remaining < 0.75;
+      const pct = Math.max(0, Math.min(100, (v / available) * 100));
+      const label = `${fmtHours(v)} / ${fmtHours(available)}h`;
+      const fillColor = critical ? "rgba(201,74,63,.6)" : "rgba(76,175,80,.45)";
+      const cls = critical ? "bad" : (v <= 0 ? "zero" : "ok");
+      return `<td class="capacity-cell ${cls}" style="background:linear-gradient(to right, ${fillColor} ${pct}%, transparent ${pct}%);">${label}</td>`;
     }
 
     const headerCells = days.map(d => {
@@ -2358,16 +2367,17 @@
     }).join("");
 
     function rowHtml(r){
-      const cells = hours[r.id].map(v => `<td class="capacity-cell ${cellClass(v)}">${v>0?fmtHours(v)+'h':'—'}</td>`).join("");
+      const cells = hours[r.id].map(v => capacityCellHtml(v, cap)).join("");
       return `<tr><td class="emp-col">${escapeHtml(r.name)}</td>${cells}</tr>`;
     }
 
     const peopleBodyRows = peopleRows.map(rowHtml).join("");
     const machineBodyRows = machineRows.map(rowHtml).join("");
 
+    const teamAvailable = employees.length * cap;
     const totalCells = days.map((d,idx) => {
       const total = peopleRows.reduce((s,r)=> s + hours[r.id][idx], 0);
-      return `<td class="capacity-cell">${total>0?fmtHours(total)+'h':'—'}</td>`;
+      return capacityCellHtml(total, teamAvailable);
     }).join("");
 
     capacityTableEl.innerHTML = `
