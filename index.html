@@ -129,6 +129,37 @@
   .job-metrics .lbl{color:var(--steel-600); font-size:10px; text-transform:uppercase; margin-right:4px;}
   .due-soon{color:var(--amber);}
   .due-late{color:var(--red);}
+  .po-tag{color:var(--steel-600); font-family:var(--mono); font-size:11.5px;}
+
+  .priority-row{
+    display:flex; align-items:center; gap:14px;
+    background:var(--steel-900); border:1px solid var(--steel-700); border-radius:6px;
+    padding:12px 16px; margin-bottom:8px;
+  }
+  .priority-row.priority-conflict{border-color:var(--red);}
+  .priority-num{
+    font-family:var(--mono); font-size:18px; font-weight:700; color:var(--steel-600);
+    width:28px; text-align:center; flex-shrink:0;
+  }
+  .priority-row.priority-conflict .priority-num{color:var(--red);}
+  .priority-main{flex:1; min-width:0;}
+  .priority-job-name{font-weight:600; font-size:14px;}
+  .priority-job-sub{color:var(--steel-400); font-size:12px; margin-top:2px; display:flex; gap:10px; flex-wrap:wrap;}
+  .priority-metrics{
+    display:flex; align-items:center; gap:14px; font-family:var(--mono); font-size:12.5px;
+    color:var(--steel-200); flex-shrink:0;
+  }
+  .priority-conflict-note{
+    font-size:11px; color:var(--red); margin-top:3px; font-family:var(--sans);
+  }
+  .priority-arrows{display:flex; flex-direction:column; gap:2px;}
+  .priority-arrow-btn{
+    all:unset; cursor:pointer; width:22px; height:18px; display:flex; align-items:center; justify-content:center;
+    background:var(--steel-800); border:1px solid var(--steel-700); border-radius:3px; color:var(--steel-200); font-size:11px;
+  }
+  .priority-arrow-btn:hover{border-color:var(--amber); color:var(--amber);}
+  .priority-arrow-btn:disabled{opacity:.3; cursor:default;}
+  .priority-arrow-btn:disabled:hover{border-color:var(--steel-700); color:var(--steel-200);}
 
   .job-body{padding:0 18px 16px 18px; border-top:1px solid var(--steel-800); display:none;}
   .job-body.open{display:block;}
@@ -353,6 +384,7 @@
     </div>
     <div class="nav">
       <button class="nav-btn active" data-view="jobs"><span class="nav-dot"></span>Jobs</button>
+      <button class="nav-btn" data-view="priority"><span class="nav-dot"></span>Priority</button>
       <button class="nav-btn" data-view="cutlist"><span class="nav-dot"></span>Cut List</button>
       <button class="nav-btn" data-view="materials"><span class="nav-dot"></span>Materials</button>
       <button class="nav-btn" data-view="capacity"><span class="nav-dot"></span>Capacity</button>
@@ -377,6 +409,18 @@
       <div class="stat-row" id="stat-row"></div>
 
       <div id="jobs-list"></div>
+    </div>
+
+    <!-- ===================== PRIORITY VIEW ===================== -->
+    <div class="view" id="view-priority">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Priority</h1>
+          <div class="page-sub">The order to work jobs in to hit every deadline. Scheduled and in-progress jobs only.</div>
+        </div>
+        <button class="btn btn-ghost" id="btn-auto-sort-priority">Auto-sort by due date</button>
+      </div>
+      <div id="priority-list"></div>
     </div>
 
     <!-- ===================== CUT LIST VIEW ===================== -->
@@ -465,6 +509,10 @@
     <div class="field">
       <label>Job name / description</label>
       <input type="text" id="nj-name" placeholder="e.g. Bracket set — 40 off">
+    </div>
+    <div class="field">
+      <label>Customer PO number</label>
+      <input type="text" id="nj-po" placeholder="e.g. PO-4521">
     </div>
     <div class="field">
       <label>Due date</label>
@@ -592,6 +640,8 @@
   state.jobs.forEach(job => {
     if(typeof job.notes !== "string") job.notes = "";
     if(typeof job.invoiced !== "boolean") job.invoiced = false;
+    if(typeof job.poNumber !== "string") job.poNumber = "";
+    if(typeof job.priority !== "number") job.priority = 0;
     job.items.forEach(item => {
       if(!Array.isArray(item.assignedTo)) item.assignedTo = item.assignedTo ? [item.assignedTo] : [];
       if(!Array.isArray(item.attachments)) item.attachments = [];
@@ -635,7 +685,8 @@
 
   function getJobs(){ return state.jobs; }
 
-  function saveJob({customer, name, due, notes}){
+  function saveJob({customer, name, due, notes, poNumber}){
+    const maxPriority = state.jobs.reduce((m,j)=> Math.max(m, Number(j.priority)||0), 0);
     const job = {
       id: uid("job"),
       customer: customer || "—",
@@ -645,11 +696,44 @@
       createdAt: new Date().toISOString(),
       items: [],
       notes: notes || "",
-      invoiced: false
+      invoiced: false,
+      poNumber: poNumber || "",
+      priority: maxPriority + 1
     };
     state.jobs.unshift(job);
     persistState();
     return job;
+  }
+
+  function updateJobPoNumber(jobId, poNumber){
+    const job = state.jobs.find(j => j.id === jobId);
+    if(job){ job.poNumber = poNumber; persistState(); }
+  }
+
+  function reorderJobPriority(jobId, direction){
+    // direction: -1 moves it earlier (higher urgency), +1 moves it later.
+    // Only scheduled/in-progress jobs form the queue — quoted work isn't committed and done work is finished.
+    const active = state.jobs.filter(j => j.status === "scheduled" || j.status === "in_progress").sort((a,b) => (a.priority||0) - (b.priority||0));
+    const idx = active.findIndex(j => j.id === jobId);
+    if(idx === -1) return;
+    const swapIdx = idx + direction;
+    if(swapIdx < 0 || swapIdx >= active.length) return;
+    const tmp = active[idx].priority;
+    active[idx].priority = active[swapIdx].priority;
+    active[swapIdx].priority = tmp;
+    persistState();
+  }
+
+  function autoSortPriorityByDueDate(){
+    const active = state.jobs.filter(j => j.status === "scheduled" || j.status === "in_progress");
+    const sorted = active.slice().sort((a,b) => {
+      if(a.due && b.due) return new Date(a.due) - new Date(b.due);
+      if(a.due) return -1;
+      if(b.due) return 1;
+      return (a.priority||0) - (b.priority||0);
+    });
+    sorted.forEach((job, i) => { job.priority = i + 1; });
+    persistState();
   }
 
   function updateJobNotes(jobId, notes){
@@ -868,6 +952,106 @@
   function jobRemaining(job){ return Math.max(0, jobEstimated(job) - jobActual(job)); }
 
   /* =========================================================
+     CAPACITY-FEASIBLE SCHEDULE SIMULATION
+     Walks the actual work queue day by day against real staff
+     and machine capacity (not an even spread) to give each job
+     a realistic projected completion date. Committed jobs
+     (scheduled / in progress) run in priority-queue order first;
+     quoted jobs are appended after them in priority order too,
+     so a not-yet-committed job gets an honest "if we started it
+     after everything already on the books" completion estimate —
+     useful for quoting a customer a real date on the spot.
+  ========================================================= */
+  function weekdayAtIndex(idx){
+    const d = new Date(); d.setHours(0,0,0,0);
+    let count = -1;
+    let guard = 0;
+    while(guard++ < 5000){
+      if(isWeekday(d)){
+        count++;
+        if(count === idx) return new Date(d);
+      }
+      d.setDate(d.getDate() + 1);
+    }
+    return new Date(d);
+  }
+
+  function simulateSchedule(){
+    const cap = state.settings.dailyCapacityHours || 8;
+    const used = {}; // resourceId -> { dayIdx: hoursUsed }
+
+    function consume(resourceId, hours){
+      if(!resourceId || hours <= 0) return -1;
+      if(!used[resourceId]) used[resourceId] = {};
+      const bucket = used[resourceId];
+      let remaining = hours;
+      let dayIdx = 0;
+      let lastDay = 0;
+      let guard = 0;
+      while(remaining > 1e-9 && guard++ < 5000){
+        const u = bucket[dayIdx] || 0;
+        const avail = cap - u;
+        if(avail > 1e-9){
+          const take = Math.min(avail, remaining);
+          bucket[dayIdx] = u + take;
+          remaining -= take;
+          lastDay = dayIdx;
+        }
+        if(remaining > 1e-9) dayIdx++;
+      }
+      return lastDay;
+    }
+
+    function runTask(hours, assignedIds, process){
+      if(hours <= 0) return -1;
+      const ids = (assignedIds && assignedIds.length) ? assignedIds : ["__unassigned__"];
+      let finish = -1;
+      ids.forEach(id => { finish = Math.max(finish, consume(id, hours)); });
+      if(process && PROCESS_OPTIONS.includes(process)){
+        finish = Math.max(finish, consume("machine:" + process, hours));
+      }
+      return finish;
+    }
+
+    const committed = getJobs()
+      .filter(j => j.status === "scheduled" || j.status === "in_progress")
+      .sort((a,b) => (a.priority||0) - (b.priority||0));
+    const quoted = getJobs()
+      .filter(j => j.status === "quoted")
+      .sort((a,b) => (a.priority||0) - (b.priority||0));
+
+    const results = {}; // jobId -> { dayIdx, date, late }
+    [...committed, ...quoted].forEach(job => {
+      let jobFinish = -1;
+      job.items.forEach(item => {
+        const mainRemaining = Math.max(0, (Number(item.estimatedHours)||0) - (Number(item.actualHours)||0));
+        if(mainRemaining > 0){
+          jobFinish = Math.max(jobFinish, runTask(mainRemaining, item.assignedTo, item.process));
+        }
+        if(item.cutList && item.cutList.enabled){
+          const cutRemaining = Math.max(0, (Number(item.cutList.estimatedHours)||0) - (Number(item.cutList.actualHours)||0));
+          if(cutRemaining > 0){
+            jobFinish = Math.max(jobFinish, runTask(cutRemaining, item.cutList.assignedTo, null));
+          }
+        }
+      });
+      if(jobFinish === -1){
+        results[job.id] = { dayIdx: -1, date: null, late: false };
+      } else {
+        const date = weekdayAtIndex(jobFinish);
+        const due = job.due ? new Date(job.due + "T00:00:00") : null;
+        results[job.id] = { dayIdx: jobFinish, date, late: due ? date > due : false };
+      }
+    });
+    return results;
+  }
+
+  function fmtProjectedDate(date){
+    if(!date) return "";
+    return date.toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
+  }
+
+  /* =========================================================
      RENDER — JOBS VIEW
   ========================================================= */
   const jobsListEl = document.getElementById("jobs-list");
@@ -1011,6 +1195,7 @@
 
   function renderJobs(){
     const jobs = getJobs();
+    const schedule = simulateSchedule();
     if(jobs.length === 0){
       jobsListEl.innerHTML = `
         <div class="card">
@@ -1031,6 +1216,16 @@
       const dueLabel = job.due
         ? (d < 0 ? `${Math.abs(d)}d overdue` : d === 0 ? "due today" : `due in ${d}d`)
         : "no due date";
+
+      const proj = schedule[job.id];
+      let projHtml = "";
+      if(proj && proj.date){
+        const projClass = proj.late ? "due-late" : "";
+        const projTitle = (job.status === "quoted")
+          ? "Realistic finish if started after everything already scheduled/in progress"
+          : "Realistic finish given the current work queue and staff/machine capacity";
+        projHtml = `<span class="${projClass}" title="${projTitle}"><span class="lbl">Projected</span>${fmtProjectedDate(proj.date)}${proj.late ? ' ⚠' : ''}</span>`;
+      }
 
       const itemsCards = job.items.map(item => {
         const cl = item.cutList || {};
@@ -1129,7 +1324,7 @@
           <div class="job-title-block">
             <div>
               <div class="job-name">${escapeHtml(job.name)}</div>
-              <div class="job-customer">${escapeHtml(job.customer)}</div>
+              <div class="job-customer">${escapeHtml(job.customer)}${job.poNumber ? ` <span class="po-tag">PO ${escapeHtml(job.poNumber)}</span>` : ""}</div>
             </div>
           </div>
           <div class="job-metrics">
@@ -1139,6 +1334,7 @@
             <span><span class="lbl">Est</span>${fmtHours(est)}h</span>
             <span><span class="lbl">Actual</span>${fmtHours(act)}h</span>
             <span class="${dueClass}">${dueLabel}</span>
+            ${projHtml}
             <button class="btn btn-danger del-job-btn" title="Delete job">✕</button>
           </div>
         </div>
@@ -1153,6 +1349,84 @@
 
     renderStats();
     wireJobEvents();
+  }
+
+  /* =========================================================
+     RENDER — PRIORITY VIEW
+     The work queue: scheduled/in-progress jobs in the order
+     they should be tackled, with a heads-up when the manual
+     order puts a more urgent deadline behind a less urgent one.
+  ========================================================= */
+  const priorityListEl = document.getElementById("priority-list");
+
+  function renderPriority(){
+    const active = getJobs().filter(j => j.status === "scheduled" || j.status === "in_progress");
+    if(active.length === 0){
+      priorityListEl.innerHTML = `
+        <div class="card">
+          <div class="empty">
+            <div class="empty-title">Nothing queued</div>
+            <div>Set a job's status to Scheduled or In progress to add it to the work queue.</div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const sorted = active.slice().sort((a,b) => (a.priority||0) - (b.priority||0));
+    const schedule = simulateSchedule();
+
+    const rows = sorted.map((job, i) => {
+      const remaining = jobRemaining(job);
+      const d = daysUntil(job.due);
+      let dueClass = "";
+      if(d !== null){ if(d < 0) dueClass = "due-late"; else if(d <= 2) dueClass = "due-soon"; }
+      const dueLabel = job.due
+        ? (d < 0 ? `${Math.abs(d)}d overdue` : d === 0 ? "due today" : `due in ${d}d`)
+        : "no due date";
+
+      const proj = schedule[job.id];
+      const conflict = !!(proj && proj.late);
+      const projLabel = (proj && proj.date) ? fmtProjectedDate(proj.date) : "—";
+
+      return `
+      <div class="priority-row ${conflict?'priority-conflict':''}" data-job="${job.id}">
+        <div class="priority-num">${i+1}</div>
+        <div class="priority-arrows">
+          <button class="priority-arrow-btn priority-up-btn" ${i===0?'disabled':''} title="Move earlier">▲</button>
+          <button class="priority-arrow-btn priority-down-btn" ${i===sorted.length-1?'disabled':''} title="Move later">▼</button>
+        </div>
+        <div class="priority-main">
+          <div class="priority-job-name">${escapeHtml(job.name)}</div>
+          <div class="priority-job-sub">
+            <span>${escapeHtml(job.customer)}</span>
+            ${job.poNumber ? `<span class="po-tag">PO ${escapeHtml(job.poNumber)}</span>` : ""}
+            <span class="${dueClass}">${dueLabel}</span>
+          </div>
+          ${conflict ? `<div class="priority-conflict-note">Projected to finish after its due date at this position in the queue — move it up or free up capacity</div>` : ""}
+        </div>
+        <div class="priority-metrics">
+          <span><span class="lbl" style="color:var(--steel-600); font-size:10px; text-transform:uppercase; margin-right:4px;">Remaining</span>${fmtHours(remaining)}h</span>
+          <span class="${conflict?'due-late':''}"><span class="lbl" style="color:var(--steel-600); font-size:10px; text-transform:uppercase; margin-right:4px;">Projected finish</span>${projLabel}</span>
+        </div>
+      </div>`;
+    }).join("");
+
+    priorityListEl.innerHTML = rows;
+
+    priorityListEl.querySelectorAll(".priority-up-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const jobId = btn.closest(".priority-row").getAttribute("data-job");
+        reorderJobPriority(jobId, -1);
+        renderPriority();
+      });
+    });
+    priorityListEl.querySelectorAll(".priority-down-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const jobId = btn.closest(".priority-row").getAttribute("data-job");
+        reorderJobPriority(jobId, 1);
+        renderPriority();
+      });
+    });
   }
 
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1175,7 +1449,7 @@
       sel.addEventListener("change", () => {
         const jobId = sel.closest(".card").getAttribute("data-job");
         updateJobStatus(jobId, sel.value);
-        renderJobs(); renderCapacity(); renderInvoicing();
+        renderJobs(); renderCapacity(); renderInvoicing(); renderPriority();
       });
     });
 
@@ -1184,7 +1458,7 @@
         e.stopPropagation();
         const jobId = btn.closest(".card").getAttribute("data-job");
         if(confirm("Delete this job and all its items?")){
-          deleteJob(jobId); renderJobs(); renderCapacity(); renderCutList(); renderInvoicing();
+          deleteJob(jobId); renderJobs(); renderCapacity(); renderCutList(); renderInvoicing(); renderPriority();
         }
       });
     });
@@ -1756,7 +2030,7 @@
           <div class="job-title-block">
             <div>
               <div class="job-name">${escapeHtml(job.name)}</div>
-              <div class="job-customer">${escapeHtml(job.customer)}</div>
+              <div class="job-customer">${escapeHtml(job.customer)}${job.poNumber ? ` <span class="po-tag">PO ${escapeHtml(job.poNumber)}</span>` : ""}</div>
             </div>
           </div>
           <div class="job-metrics">
@@ -1906,13 +2180,20 @@
       if(btn.getAttribute("data-view") === "cutlist") renderCutList();
       if(btn.getAttribute("data-view") === "materials") renderMaterials();
       if(btn.getAttribute("data-view") === "invoicing") renderInvoicing();
+      if(btn.getAttribute("data-view") === "priority") renderPriority();
     });
+  });
+
+  document.getElementById("btn-auto-sort-priority").addEventListener("click", () => {
+    autoSortPriorityByDueDate();
+    renderPriority();
   });
 
   const modal = document.getElementById("modal-new-job");
   document.getElementById("btn-new-job").addEventListener("click", () => {
     document.getElementById("nj-customer").value = "";
     document.getElementById("nj-name").value = "";
+    document.getElementById("nj-po").value = "";
     document.getElementById("nj-due").value = "";
     document.getElementById("nj-notes").value = "";
     modal.classList.add("open");
@@ -1927,7 +2208,8 @@
       customer: document.getElementById("nj-customer").value.trim(),
       name,
       due: document.getElementById("nj-due").value,
-      notes: document.getElementById("nj-notes").value.trim()
+      notes: document.getElementById("nj-notes").value.trim(),
+      poNumber: document.getElementById("nj-po").value.trim()
     });
     openJobIds.add(job.id);
     modal.classList.remove("open");
@@ -2051,6 +2333,7 @@
   renderCutList();
   renderInvoicing();
   renderMaterials();
+  renderPriority();
 })();
 </script>
 </body>
