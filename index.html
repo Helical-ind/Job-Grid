@@ -410,30 +410,31 @@
   #print-label-area{display:none;}
   .print-label{
     font-family:var(--sans); color:#000; background:#fff;
+    box-sizing:border-box; padding:7mm 6mm;
   }
-  .print-label-head{border-bottom:2px solid #000; padding-bottom:6px; margin-bottom:8px;}
+  .print-label-head{border-bottom:2px solid #000; padding-bottom:7px; margin-bottom:9px;}
   .print-job-name{font-size:11px; font-weight:600; line-height:1.15; color:#444; text-transform:uppercase; letter-spacing:.02em;}
-  .print-customer-name{font-size:20px; font-weight:700; line-height:1.2; margin-top:2px;}
-  .print-po{font-size:12px; margin-top:2px;}
-  .print-job-due{font-size:12px; font-weight:600; margin-top:4px;}
+  .print-customer-name{font-size:21px; font-weight:700; line-height:1.2; margin-top:2px;}
+  .print-po{font-size:13px; margin-top:3px;}
+  .print-job-due{font-size:13px; font-weight:600; margin-top:5px;}
   .print-job-due.print-due-late{color:#000; text-decoration:underline;}
-  .print-cutlist-table{width:100%; border-collapse:collapse; font-size:9.5px; margin-top:4px;}
+  .print-cutlist-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:6px;}
   .print-cutlist-table th{
-    text-align:left; text-transform:uppercase; letter-spacing:.03em; font-size:8px;
-    border-bottom:1px solid #000; padding:3px 3px; font-weight:600;
+    text-align:left; text-transform:uppercase; letter-spacing:.03em; font-size:9.5px;
+    border-bottom:1px solid #000; padding:4px 3px; font-weight:600;
   }
-  .print-cutlist-table td{border-bottom:1px solid #999; padding:4px 3px; vertical-align:top;}
+  .print-cutlist-table td{border-bottom:1px solid #999; padding:7px 3px; vertical-align:top;}
   .print-cutlist-table td.num{text-align:right; font-family:var(--mono);}
-  .print-empty{font-size:11px; margin-top:8px; font-style:italic;}
-  .print-notes{font-size:10px; margin-top:10px; padding-top:6px; border-top:1px dashed #999; white-space:pre-wrap;}
-  .print-label-foot{font-size:8px; color:#555; margin-top:10px;}
+  .print-empty{font-size:12px; margin-top:8px; font-style:italic;}
+  .print-notes{font-size:11px; margin-top:12px; padding-top:7px; border-top:1px dashed #999; white-space:pre-wrap;}
+  .print-label-foot{font-size:8px; color:#555; margin-top:12px;}
 
   @media print{
-    @page{ size:104mm 159mm; margin:4mm; }
+    @page{ size:104mm 159mm; margin:0; }
     body *{ visibility:hidden; }
     #print-label-area, #print-label-area *{ visibility:visible; }
     #print-label-area{
-      display:block; position:absolute; top:0; left:0; width:100%;
+      display:block; position:absolute; top:0; left:0; width:104mm; height:159mm;
     }
   }
 </style>
@@ -1686,7 +1687,6 @@
         <td>${escapeHtml(matLabel)}</td>
         <td class="num">${cl.quantity || 0}</td>
         <td class="num">${fmtLength(cl.length || 0)}</td>
-        <td>${escapeHtml(cutAssignedLabel(item))}</td>
       </tr>`;
     }).join("");
 
@@ -1700,7 +1700,7 @@
         </div>
         ${cutItems.length ? `
         <table class="print-cutlist-table">
-          <thead><tr><th>Item</th><th>Material</th><th>Qty</th><th>Length ea.</th><th>Assigned</th></tr></thead>
+          <thead><tr><th>Item</th><th>Material</th><th>Qty</th><th>Length ea.</th></tr></thead>
           <tbody>${rowsHtml}</tbody>
         </table>` : `<div class="print-empty">No cut list items on this job.</div>`}
         ${job.notes ? `<div class="print-notes">${escapeHtml(job.notes)}</div>` : ""}
