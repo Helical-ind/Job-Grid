@@ -405,38 +405,11 @@
     .main{padding:18px;}
   }
 
-  /* ---------- printable 104x159mm cut-list label ---------- */
+  /* ---------- print cut-list button ----------
+     The label itself is built and printed in its own separate window
+     (see printJobCutList) so it can't be affected by this page's own
+     layout/pagination — the markup and styles for it live there. */
   .print-cutlist-btn{white-space:nowrap;}
-  #print-label-area{display:none;}
-  .print-label{
-    font-family:var(--sans); color:#000; background:#fff;
-    box-sizing:border-box; padding:7mm 6mm;
-    width:104mm; height:159mm; overflow:hidden;
-  }
-  .print-label-head{border-bottom:2px solid #000; padding-bottom:7px; margin-bottom:9px;}
-  .print-job-name{font-size:11px; font-weight:600; line-height:1.15; color:#444; text-transform:uppercase; letter-spacing:.02em;}
-  .print-customer-name{font-size:21px; font-weight:700; line-height:1.2; margin-top:2px;}
-  .print-po{font-size:13px; margin-top:3px;}
-  .print-job-due{font-size:13px; font-weight:600; margin-top:5px;}
-  .print-job-due.print-due-late{color:#000; text-decoration:underline;}
-  .print-cutlist-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:6px;}
-  .print-cutlist-table th{
-    text-align:left; text-transform:uppercase; letter-spacing:.03em; font-size:9.5px;
-    border-bottom:1px solid #000; padding:4px 3px; font-weight:600;
-  }
-  .print-cutlist-table td{border-bottom:1px solid #999; padding:7px 3px; vertical-align:top;}
-  .print-cutlist-table td.num{text-align:right; font-family:var(--mono);}
-  .print-empty{font-size:12px; margin-top:8px; font-style:italic;}
-  .print-notes{font-size:11px; margin-top:12px; padding-top:7px; border-top:1px dashed #999; white-space:pre-wrap;}
-  .print-label-foot{font-size:8px; color:#555; margin-top:12px;}
-
-  @media print{
-    @page{ size:104mm 159mm; margin:0; }
-    html, body{ margin:0; padding:0; width:104mm; height:159mm; }
-    body > *{ display:none !important; }
-    body > #print-label-area{ display:block !important; }
-    #print-label-area{ width:104mm; height:159mm; overflow:hidden; }
-  }
 </style>
 </head>
 <body>
@@ -700,7 +673,6 @@
 </div>
 
 <div class="popover" id="popover" style="display:none;"></div>
-<div id="print-label-area"></div>
 
 <script>
 (function(){
@@ -1661,8 +1633,11 @@
   function escapeAttr(s){ return escapeHtml(s); }
 
   /* ---------- printable A5 cut-list label ---------- */
-  const printLabelEl = document.getElementById("print-label-area");
-
+  // Printed in its own isolated window/document rather than hidden inside the
+  // main app page — this is what actually guarantees a single page: the main
+  // app's own layout (sidebar, other jobs, etc.) can otherwise still influence
+  // print pagination even when "hidden", which is what was causing extra
+  // blank pages in some browsers.
   function printJobCutList(jobId){
     const job = getJobs().find(j => j.id === jobId);
     if(!job) return;
@@ -1690,24 +1665,71 @@
       </tr>`;
     }).join("");
 
-    printLabelEl.innerHTML = `
-      <div class="print-label">
-        <div class="print-label-head">
-          <div class="print-job-name">${escapeHtml(job.name)}</div>
-          <div class="print-customer-name">${escapeHtml(job.customer)}</div>
-          ${job.poNumber ? `<div class="print-po">PO ${escapeHtml(job.poNumber)}</div>` : ""}
-          <div class="print-job-due ${dueLate ? 'print-due-late' : ''}">${dueLine}</div>
-        </div>
-        ${cutItems.length ? `
-        <table class="print-cutlist-table">
-          <thead><tr><th>Item</th><th>Material</th><th>Qty</th><th>Length ea.</th></tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>` : `<div class="print-empty">No cut list items on this job.</div>`}
-        ${job.notes ? `<div class="print-notes">${escapeHtml(job.notes)}</div>` : ""}
-        <div class="print-label-foot">Job Grid — printed ${new Date().toLocaleDateString(undefined,{ day:'numeric', month:'short', year:'numeric'})}</div>
-      </div>`;
+    const labelHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Cut list — ${escapeHtml(job.name)}</title>
+<style>
+  @page{ size:104mm 159mm; margin:0; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; width:104mm; height:159mm; }
+  body{ font-family:"IBM Plex Sans","Segoe UI",Arial,sans-serif; color:#000; background:#fff; }
+  .print-label{
+    width:100%; height:100%; padding:6mm 5mm;
+    border:1.5px solid #000; box-sizing:border-box;
+  }
+  .print-label-head{border-bottom:2px solid #000; padding-bottom:7px; margin-bottom:9px;}
+  .print-job-name{font-size:11px; font-weight:600; line-height:1.15; color:#444; text-transform:uppercase; letter-spacing:.02em;}
+  .print-customer-name{font-size:21px; font-weight:700; line-height:1.2; margin-top:2px;}
+  .print-po{font-size:13px; margin-top:3px;}
+  .print-job-due{font-size:13px; font-weight:600; margin-top:5px;}
+  .print-job-due.print-due-late{text-decoration:underline;}
+  .print-cutlist-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:6px;}
+  .print-cutlist-table th{
+    text-align:left; text-transform:uppercase; letter-spacing:.03em; font-size:9.5px;
+    border-bottom:1px solid #000; padding:4px 3px; font-weight:600;
+  }
+  .print-cutlist-table td{border-bottom:1px solid #999; padding:7px 3px; vertical-align:top;}
+  .print-cutlist-table td.num{text-align:right; font-family:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;}
+  .print-empty{font-size:12px; margin-top:8px; font-style:italic;}
+  .print-notes{font-size:11px; margin-top:12px; padding-top:7px; border-top:1px dashed #999; white-space:pre-wrap;}
+  .print-label-foot{font-size:8px; color:#555; margin-top:12px;}
+</style>
+</head>
+<body>
+  <div class="print-label">
+    <div class="print-label-head">
+      <div class="print-job-name">${escapeHtml(job.name)}</div>
+      <div class="print-customer-name">${escapeHtml(job.customer)}</div>
+      ${job.poNumber ? `<div class="print-po">PO ${escapeHtml(job.poNumber)}</div>` : ""}
+      <div class="print-job-due ${dueLate ? 'print-due-late' : ''}">${dueLine}</div>
+    </div>
+    ${cutItems.length ? `
+    <table class="print-cutlist-table">
+      <thead><tr><th>Item</th><th>Material</th><th>Qty</th><th>Length ea.</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>` : `<div class="print-empty">No cut list items on this job.</div>`}
+    ${job.notes ? `<div class="print-notes">${escapeHtml(job.notes)}</div>` : ""}
+    <div class="print-label-foot">Job Grid — printed ${new Date().toLocaleDateString(undefined,{ day:'numeric', month:'short', year:'numeric'})}</div>
+  </div>
+  <script>
+    window.onload = function(){
+      window.focus();
+      window.print();
+    };
+  <\/script>
+</body>
+</html>`;
 
-    window.print();
+    const printWin = window.open("", "_blank", "width=420,height=650");
+    if(!printWin){
+      alert("Your browser blocked the print window pop-up. Please allow pop-ups for this page and try again.");
+      return;
+    }
+    printWin.document.open();
+    printWin.document.write(labelHtml);
+    printWin.document.close();
   }
 
   function wireJobEvents(){
